@@ -17,6 +17,14 @@ public class InteractiveBattle {
     this.army2 = army2;
   }
 
+  public Army getArmy1() {
+    return army1;
+  }
+
+  public Army getArmy2() {
+    return army2;
+  }
+
   public void initBattle() {
     gridPositions.clear();
     logs.clear();

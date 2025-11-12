@@ -2,30 +2,32 @@ package com.battlesimulator.ui;
 
 import com.battlesimulator.domain.*;
 import com.battlesimulator.usecases.InteractiveBattle;
+import com.battlesimulator.usecases.WarController;
 import java.awt.*;
 import javax.swing.*;
 
 public class BattleFrame extends JDialog {
   private static final int GRID_SIZE = 12;
   private final InteractiveBattle battleCtrl;
+  private final WarController warController;
   private final JButton[][] gridButtons = new JButton[GRID_SIZE][GRID_SIZE];
   private IWarrior selectedAttacker;
   private final JTextArea logArea = new JTextArea();
   private final JLabel turnLabel = new JLabel();
   private Army winner;
 
-  public BattleFrame(InteractiveBattle battleCtrl, JFrame parent) {
-    super(parent, "Batalla en cuadricula", true);
+  public BattleFrame(InteractiveBattle battleCtrl, WarController warController) {
+    super(warController, "Batalla en cuadricula", false); // non-modal
     this.battleCtrl = battleCtrl;
+    this.warController = warController;
     initUI();
-    battleCtrl.initBattle();
     refreshGrid();
     updateTurnLabel();
     logArea.append("Batalla iniciada. Selecciona guerrero y enemigo.\n");
   }
 
   private void initUI() {
-    setSize(1200, 900); // Aumentar tamaño de ventana para acomodar botones más grandes
+    setSize(1200, 900);
     setLayout(new BorderLayout());
 
     // Turn label
@@ -36,8 +38,8 @@ public class BattleFrame extends JDialog {
     for (int r = 0; r < GRID_SIZE; r++) {
       for (int c = 0; c < GRID_SIZE; c++) {
         JButton btn = new JButton();
-        btn.setPreferredSize(new Dimension(48, 48));
-        btn.setFont(new Font("Arial", Font.BOLD, 18));
+        btn.setPreferredSize(new Dimension(60, 60));
+        btn.setFont(new Font("Arial", Font.BOLD, 12));
         btn.setMargin(new Insets(2, 2, 2, 2));
         int finalR = r, finalC = c;
         btn.addActionListener(e -> handleButtonClick(finalR, finalC));
@@ -79,6 +81,7 @@ public class BattleFrame extends JDialog {
                     + battleCtrl.getWinner().getClan().getName() + ")",
                 "Victoria batalla", JOptionPane.INFORMATION_MESSAGE);
             winner = battleCtrl.getWinner();
+            warController.battleFinished(battleCtrl);
             dispose();
           }
         } catch (IllegalArgumentException ex) {
@@ -108,6 +111,7 @@ public class BattleFrame extends JDialog {
         if (w == null) {
           btn.setText("");
           btn.setBackground(Color.GRAY.darker());
+          btn.setForeground(Color.BLACK); // default
           btn.setToolTipText(null);
         } else {
           btn.setText(w.getId());
@@ -116,11 +120,21 @@ public class BattleFrame extends JDialog {
             bg = Color.YELLOW;
           }
           btn.setBackground(bg);
+          Color fg = getContrastColor(bg);
+          btn.setForeground(fg);
           btn.setToolTipText(String.format("HP:%d Sh:%d Str:%d %s", w.getHealth(), w.getShield(), w.getStrength(),
               w.getWeapon().getName()));
         }
       }
     }
+  }
+
+  private Color getContrastColor(Color bg) {
+    int r = bg.getRed();
+    int g = bg.getGreen();
+    int b = bg.getBlue();
+    double brightness = (r * 299 + g * 587 + b * 114) / 1000.0;
+    return brightness > 128 ? Color.BLACK : Color.WHITE;
   }
 
   private void updateTurnLabel() {
