@@ -34,4 +34,12 @@ public interface IWarrior {
   void setClan(Clan clan);
 
   void reset();
+  
+  default String getWarriorType() {
+    String className = this.getClass().getSimpleName();
+    if (className.contains("Melee")) return "melee";
+    if (className.contains("Ranged")) return "ranged";
+    if (className.contains("Magic")) return "magic";
+    return "default";
+  }
 }

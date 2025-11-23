@@ -1,29 +1,38 @@
 package com.battlesimulator.ui;
 
 import com.battlesimulator.domain.*;
+import com.battlesimulator.network.GameClient;
+import com.battlesimulator.network.Message;
 import com.battlesimulator.usecases.InteractiveBattle;
-import com.battlesimulator.usecases.WarController;
+import com.battlesimulator.usecases.MultiplayerWarController;
 import java.awt.*;
 import javax.swing.*;
 
-public class BattleFrame extends JDialog {
+public class MultiplayerBattleFrame extends JDialog {
   private static final int GRID_SIZE = 12;
   private final InteractiveBattle battleCtrl;
-  private final WarController warController;
+  private final MultiplayerWarController warController;
+  private final GameClient client;
+  private final boolean controlsArmy1; // true si controla ejército 1, false si controla ejército 2
   private final JButton[][] gridButtons = new JButton[GRID_SIZE][GRID_SIZE];
   private IWarrior selectedAttacker;
   private final JTextArea logArea = new JTextArea();
   private final JLabel turnLabel = new JLabel();
   private Army winner;
 
-  public BattleFrame(InteractiveBattle battleCtrl, WarController warController) {
-    super(warController, "Batalla en cuadricula", false); // non-modal
+  public MultiplayerBattleFrame(InteractiveBattle battleCtrl, MultiplayerWarController warController, 
+                                GameClient client, boolean controlsArmy1) {
+    super(warController, "Batalla en cuadricula (Multijugador)", false);
     this.battleCtrl = battleCtrl;
     this.warController = warController;
+    this.client = client;
+    this.controlsArmy1 = controlsArmy1;
     initUI();
+    setupNetworkListener();
     refreshGrid();
     updateTurnLabel();
-    logArea.append("Batalla iniciada. Selecciona guerrero y enemigo.\n");
+    logArea.append("Batalla iniciada. Espera tu turno para atacar.\n");
+    logArea.append("Controlas: " + (controlsArmy1 ? "Ejército 1" : "Ejército 2") + "\n");
   }
 
   private void initUI() {
@@ -36,7 +45,7 @@ public class BattleFrame extends JDialog {
     UITheme.stylePanel(topPanel);
     topPanel.setBorder(BorderFactory.createEmptyBorder(10, 20, 10, 20));
     
-    JLabel titleLabel = new JLabel("CAMPO DE BATALLA", SwingConstants.CENTER);
+    JLabel titleLabel = new JLabel("BATALLA MULTIJUGADOR", SwingConstants.CENTER);
     UITheme.styleTitleLabel(titleLabel);
     topPanel.add(titleLabel, BorderLayout.NORTH);
     
@@ -94,8 +103,18 @@ public class BattleFrame extends JDialog {
 
     pack();
   }
+  
+  private void setupNetworkListener() {
+    // El cliente ya tiene un listener, aquí solo procesamos los mensajes de ataque
+  }
 
   private void handleButtonClick(int row, int col) {
+    // Solo permitir acciones si es el turno del jugador
+    if (!isMyTurn()) {
+      JOptionPane.showMessageDialog(this, "No es tu turno!", "Espera", JOptionPane.WARNING_MESSAGE);
+      return;
+    }
+    
     Position p = new Position(row, col);
     IWarrior clicked = battleCtrl.getWarriorAt(p);
     if (clicked == null || !clicked.isAlive())
@@ -104,22 +123,40 @@ public class BattleFrame extends JDialog {
     if (battleCtrl.isOwnWarrior(clicked)) {
       selectedAttacker = clicked;
       refreshGrid();
-      logArea.append("Atacante: " + clicked.getId() + "\n");
+      logArea.append("Atacante seleccionado: " + clicked.getId() + "\n");
     } else {
       if (selectedAttacker != null) {
         try {
+          // Capturar posiciones antes del ataque para el efecto visual
           Position attPos = selectedAttacker.getPosition();
           Position tarPos = clicked.getPosition();
-          DamageReport dr = battleCtrl.performAttack(selectedAttacker, clicked);
           
-          // Efecto visual
+          // Realizar ataque localmente
+          DamageReport dr = battleCtrl.performAttack(selectedAttacker, clicked);
+          String logLine = generateLogLine(selectedAttacker, clicked, dr);
+          logArea.append(logLine + "\n");
+          logArea.setCaretPosition(logArea.getDocument().getLength());
+          
+          // Efecto visual del ataque
           flashAttackEffect(attPos, tarPos, dr.isKilled());
           
-          logArea.append(generateLogLine(selectedAttacker, clicked, dr) + "\n");
-          logArea.setCaretPosition(logArea.getDocument().getLength());
+          // Enviar ataque al otro jugador
+          if (client != null) {
+            String attackData = String.format("%s|%s|%d|%d|%d|%b", 
+              selectedAttacker.getId(), 
+              clicked.getId(),
+              dr.getBaseDamage(),
+              dr.getFinalDamage(),
+              clicked.getHealth(),
+              dr.isKilled());
+            Message msg = new Message(Message.Type.ATTACK, attackData);
+            client.sendMessage(msg);
+          }
+          
           selectedAttacker = null;
           refreshGrid();
           updateTurnLabel();
+          
           if (battleCtrl.isBattleOver()) {
             JOptionPane.showMessageDialog(this,
                 "Ganador batalla: Ej. " + battleCtrl.getWinner().getId() + " ("
@@ -133,6 +170,15 @@ public class BattleFrame extends JDialog {
           JOptionPane.showMessageDialog(this, ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
         }
       }
+    }
+  }
+  
+  private boolean isMyTurn() {
+    Army currentArmy = battleCtrl.getCurrentTurnArmy();
+    if (controlsArmy1) {
+      return currentArmy == battleCtrl.getArmy1();
+    } else {
+      return currentArmy == battleCtrl.getArmy2();
     }
   }
 
@@ -175,12 +221,21 @@ public class BattleFrame extends JDialog {
           
           // Color de fondo
           Color bg = clanColor.darker().darker();
-          if (selectedAttacker == w) {
-            bg = UITheme.ACCENT_GOLD;
-            btn.setBorder(BorderFactory.createLineBorder(Color.YELLOW, 3));
+          
+          // Resaltar mis guerreros
+          if (isMyWarrior(w)) {
+            bg = clanColor.darker();
+            btn.setBorder(BorderFactory.createLineBorder(UITheme.ACCENT_GOLD.brighter(), 2));
           } else {
             btn.setBorder(BorderFactory.createLineBorder(UITheme.BATTLE_GRID_BORDER, 1));
           }
+          
+          // Resaltar atacante seleccionado
+          if (selectedAttacker == w) {
+            bg = UITheme.ACCENT_GOLD;
+            btn.setBorder(BorderFactory.createLineBorder(Color.YELLOW, 3));
+          }
+          
           btn.setBackground(bg);
           
           // Color del texto
@@ -189,14 +244,16 @@ public class BattleFrame extends JDialog {
           
           // Tooltip detallado
           String weaponName = w.getWeapon().getName();
+          String ownerInfo = isMyWarrior(w) ? " (TUS TROPAS)" : " (ENEMIGO)";
           String tooltip = String.format(
-            "<html><b>%s</b><br>" +
+            "<html><b>%s</b>%s<br>" +
             "Tipo: %s<br>" +
             "Salud: %d<br>" +
             "Escudo: %d<br>" +
             "Fuerza: %d<br>" +
             "Arma: %s</html>",
             w.getId(),
+            ownerInfo,
             warriorType.toUpperCase(),
             w.getHealth(),
             w.getShield(),
@@ -206,6 +263,14 @@ public class BattleFrame extends JDialog {
           btn.setToolTipText(tooltip);
         }
       }
+    }
+  }
+  
+  private boolean isMyWarrior(IWarrior w) {
+    if (controlsArmy1) {
+      return battleCtrl.getArmy1().getWarriors().contains(w);
+    } else {
+      return battleCtrl.getArmy2().getWarriors().contains(w);
     }
   }
 
@@ -218,7 +283,15 @@ public class BattleFrame extends JDialog {
   }
 
   private void updateTurnLabel() {
-    turnLabel.setText(battleCtrl.getTurnDescription());
+    String turnInfo = battleCtrl.getTurnDescription();
+    if (isMyTurn()) {
+      turnInfo += " - ¡TU TURNO!";
+      turnLabel.setForeground(Color.GREEN.darker());
+    } else {
+      turnInfo += " - Esperando...";
+      turnLabel.setForeground(Color.RED);
+    }
+    turnLabel.setText(turnInfo);
   }
   
   private void flashAttackEffect(Position attacker, Position target, boolean killed) {
@@ -254,5 +327,13 @@ public class BattleFrame extends JDialog {
 
   public Army getWinner() {
     return winner;
+  }
+  
+  public void handleRemoteAttack(String attackData) {
+    SwingUtilities.invokeLater(() -> {
+      logArea.append("Ataque enemigo recibido\n");
+      refreshGrid();
+      updateTurnLabel();
+    });
   }
 }
