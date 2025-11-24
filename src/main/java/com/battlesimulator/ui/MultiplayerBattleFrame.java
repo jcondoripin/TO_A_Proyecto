@@ -110,6 +110,7 @@ public class MultiplayerBattleFrame extends JDialog {
 
   private void handleButtonClick(int row, int col) {
     // Solo permitir acciones si es el turno del jugador
+    System.out.println("[BATTLE] Click en (" + row + "," + col + ") - isMyTurn: " + isMyTurn());
     if (!isMyTurn()) {
       JOptionPane.showMessageDialog(this, "No es tu turno!", "Espera", JOptionPane.WARNING_MESSAGE);
       return;
@@ -117,13 +118,17 @@ public class MultiplayerBattleFrame extends JDialog {
     
     Position p = new Position(row, col);
     IWarrior clicked = battleCtrl.getWarriorAt(p);
-    if (clicked == null || !clicked.isAlive())
+    if (clicked == null || !clicked.isAlive()) {
+      System.out.println("[BATTLE] No hay guerrero o está muerto");
       return;
+    }
 
+    System.out.println("[BATTLE] Guerrero clickeado: " + clicked.getId() + ", isOwnWarrior: " + battleCtrl.isOwnWarrior(clicked));
     if (battleCtrl.isOwnWarrior(clicked)) {
       selectedAttacker = clicked;
       refreshGrid();
       logArea.append("Atacante seleccionado: " + clicked.getId() + "\n");
+      System.out.println("[BATTLE] Atacante seleccionado: " + clicked.getId());
     } else {
       if (selectedAttacker != null) {
         try {
@@ -140,9 +145,11 @@ public class MultiplayerBattleFrame extends JDialog {
           // Efecto visual del ataque
           flashAttackEffect(attPos, tarPos, dr.isKilled());
           
-          // Enviar ataque al otro jugador
+          // Enviar ataque al otro jugador con índice de batalla
           if (client != null) {
-            String attackData = String.format("%s|%s|%d|%d|%d|%b", 
+            int battleIndex = warController.getBattleIndex(battleCtrl);
+            String attackData = String.format("%d|%s|%s|%d|%d|%d|%b", 
+              battleIndex,
               selectedAttacker.getId(), 
               clicked.getId(),
               dr.getBaseDamage(),
@@ -157,6 +164,14 @@ public class MultiplayerBattleFrame extends JDialog {
           refreshGrid();
           updateTurnLabel();
           
+          // Cerrar la ventana después de jugar
+          if (!battleCtrl.isBattleOver()) {
+            SwingUtilities.invokeLater(() -> {
+              setVisible(false);
+              dispose();
+            });
+          }
+          
           if (battleCtrl.isBattleOver()) {
             JOptionPane.showMessageDialog(this,
                 "Ganador batalla: Ej. " + battleCtrl.getWinner().getId() + " ("
@@ -164,7 +179,8 @@ public class MultiplayerBattleFrame extends JDialog {
                 "Victoria batalla", JOptionPane.INFORMATION_MESSAGE);
             winner = battleCtrl.getWinner();
             warController.battleFinished(battleCtrl);
-            dispose();
+            // NO cerrar la ventana, mantenerla abierta para revisar
+            // dispose();
           }
         } catch (IllegalArgumentException ex) {
           JOptionPane.showMessageDialog(this, ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
@@ -174,12 +190,16 @@ public class MultiplayerBattleFrame extends JDialog {
   }
   
   private boolean isMyTurn() {
+    // Verificar si es mi turno en esta batalla específica
     Army currentArmy = battleCtrl.getCurrentTurnArmy();
+    boolean myTurn;
     if (controlsArmy1) {
-      return currentArmy == battleCtrl.getArmy1();
+      myTurn = currentArmy == battleCtrl.getArmy1();
     } else {
-      return currentArmy == battleCtrl.getArmy2();
+      myTurn = currentArmy == battleCtrl.getArmy2();
     }
+    System.out.println("[BATTLE] isMyTurn check - controlsArmy1: " + controlsArmy1 + ", currentArmy: " + currentArmy.getId() + ", army1: " + battleCtrl.getArmy1().getId() + ", army2: " + battleCtrl.getArmy2().getId() + ", result: " + myTurn);
+    return myTurn;
   }
 
   private String generateLogLine(IWarrior att, IWarrior tar, DamageReport dr) {
@@ -294,6 +314,13 @@ public class MultiplayerBattleFrame extends JDialog {
     turnLabel.setText(turnInfo);
   }
   
+  public void updateTurnDisplay() {
+    SwingUtilities.invokeLater(() -> {
+      updateTurnLabel();
+      refreshGrid();
+    });
+  }
+  
   private void flashAttackEffect(Position attacker, Position target, boolean killed) {
     if (attacker == null || target == null) return;
     
@@ -331,9 +358,71 @@ public class MultiplayerBattleFrame extends JDialog {
   
   public void handleRemoteAttack(String attackData) {
     SwingUtilities.invokeLater(() -> {
-      logArea.append("Ataque enemigo recibido\n");
-      refreshGrid();
-      updateTurnLabel();
+      try {
+        String[] parts = attackData.split("\\|");
+        if (parts.length < 6) {
+          logArea.append("Error: datos de ataque incompletos\n");
+          return;
+        }
+        
+        String attackerId = parts[0];
+        String targetId = parts[1];
+        int baseDamage = Integer.parseInt(parts[2]);
+        int finalDamage = Integer.parseInt(parts[3]);
+        // int remainingHealth = Integer.parseInt(parts[4]); // No usado, el da\u00f1o ya est\u00e1 en finalDamage
+        boolean killed = Boolean.parseBoolean(parts[5]);
+        
+        IWarrior attacker = battleCtrl.findWarriorById(attackerId);
+        IWarrior target = battleCtrl.findWarriorById(targetId);
+        
+        if (attacker == null || target == null) {
+          logArea.append("Error: guerrero no encontrado\n");
+          return;
+        }
+        
+        // Capturar posiciones para efecto visual
+        Position attPos = attacker.getPosition();
+        Position tarPos = target.getPosition();
+        
+        // Aplicar daño al objetivo (sincronizar estado)
+        target.takeDamage(finalDamage, attacker.getWeapon().getElement());
+        
+        // Si fue asesinado, mover atacante a posición del objetivo
+        if (killed) {
+          battleCtrl.getWarriorAt(attPos); // Get attacker from grid
+          attacker.setPosition(tarPos);
+        }
+        
+        // IMPORTANTE: Cambiar el turno después del ataque
+        battleCtrl.nextTurn();
+        
+        // Generar reporte (baseDamage, multiplier, effectiveDamage, absorbed, finalDamage, killed)
+        DamageReport dr = new DamageReport(baseDamage, 1.0, baseDamage, 0, finalDamage, killed);
+        String logLine = generateLogLine(attacker, target, dr);
+        logArea.append("[ENEMIGO] " + logLine + "\n");
+        logArea.setCaretPosition(logArea.getDocument().getLength());
+        
+        // Efecto visual
+        flashAttackEffect(attPos, tarPos, killed);
+        
+        refreshGrid();
+        updateTurnLabel();
+        
+        // Verificar si la batalla terminó
+        if (battleCtrl.isBattleOver()) {
+          JOptionPane.showMessageDialog(this,
+            "Ganador batalla: Ej. " + battleCtrl.getWinner().getId() + " ("
+                + battleCtrl.getWinner().getClan().getName() + ")",
+            "Victoria batalla", JOptionPane.INFORMATION_MESSAGE);
+          winner = battleCtrl.getWinner();
+          warController.battleFinished(battleCtrl);
+          // NO cerrar, mantener abierta para revisión
+          // dispose();
+        }
+      } catch (Exception e) {
+        logArea.append("Error procesando ataque: " + e.getMessage() + "\n");
+        e.printStackTrace();
+      }
     });
   }
 }

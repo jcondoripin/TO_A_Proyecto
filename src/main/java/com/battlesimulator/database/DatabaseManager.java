@@ -73,7 +73,7 @@ public class DatabaseManager {
     String passwordHash = BCrypt.hashpw(password, BCrypt.gensalt());
     String sql = "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)";
     
-    try (PreparedStatement pstmt = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+    try (PreparedStatement pstmt = connection.prepareStatement(sql, new String[]{"id"})) {
       pstmt.setString(1, username.trim());
       pstmt.setString(2, passwordHash);
       pstmt.setString(3, LocalDateTime.now().toString());
@@ -85,7 +85,7 @@ public class DatabaseManager {
       
       try (ResultSet generatedKeys = pstmt.getGeneratedKeys()) {
         if (generatedKeys.next()) {
-          int userId = generatedKeys.getInt(1);
+          int userId = generatedKeys.getInt("id");
           
           // Crear stats iniciales
           String statsSql = "INSERT INTO stats (user_id, wins, losses, total_battles) VALUES (?, 0, 0, 0)";

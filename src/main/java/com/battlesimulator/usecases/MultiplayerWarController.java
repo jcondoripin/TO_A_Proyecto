@@ -30,17 +30,19 @@ public class MultiplayerWarController extends JFrame {
   private final JTextArea chatArea = new JTextArea();
   private final JTextField chatInput = new JTextField();
   private final User currentUser;
+  private final String myUsername;
 
   public MultiplayerWarController(Clan clan1, Clan clan2, GameClient client, boolean isHost) {
-    this(clan1, clan2, client, isHost, null);
+    this(clan1, clan2, client, isHost, null, "Jugador");
   }
   
-  public MultiplayerWarController(Clan clan1, Clan clan2, GameClient client, boolean isHost, User currentUser) {
+  public MultiplayerWarController(Clan clan1, Clan clan2, GameClient client, boolean isHost, User currentUser, String username) {
     this.clan1 = clan1;
     this.clan2 = clan2;
     this.client = client;
     this.isHost = isHost;
     this.currentUser = currentUser;
+    this.myUsername = username != null ? username : "Jugador";
     initUI();
     resetClans();
     if (isHost) {
@@ -165,13 +167,55 @@ public class MultiplayerWarController extends JFrame {
     String text = chatInput.getText().trim();
     if (!text.isEmpty() && client != null) {
       Message msg = new Message(Message.Type.CHAT, text);
+      msg.setUsername(myUsername);
       client.sendMessage(msg);
       chatInput.setText("");
+      // Mostrar mi propio mensaje
+      addChatMessage(myUsername + ": " + text);
     }
   }
   
   private void setupNetworkListeners() {
-    // Ya configurado en MainFrame, pero aquí podríamos agregar listeners específicos
+    // Los mensajes de red son manejados por el listener en MainFrame
+    // que debe tener una referencia a este controller y llamar handleNetworkMessage
+  }
+  
+  public void handleNetworkMessage(Message message) {
+    SwingUtilities.invokeLater(() -> {
+      switch (message.getType()) {
+        case ATTACK:
+          // Parsear el índice de batalla del mensaje
+          handleRemoteAttack(message.getData());
+          break;
+        case CHAT:
+          String username = message.getUsername() != null ? message.getUsername() : "Jugador";
+          // No duplicar si es mi propio mensaje
+          if (!username.equals(myUsername)) {
+            addChatMessage(username + ": " + message.getData());
+          }
+          break;
+        case WAR_END:
+          JOptionPane.showMessageDialog(MultiplayerWarController.this,
+            "¡La guerra ha terminado! Ganador: " + message.getData(),
+            "Fin de la Guerra", JOptionPane.INFORMATION_MESSAGE);
+          break;
+        case BATTLE_END:
+          warLogArea.append("Batalla finalizada. Ganador: " + message.getData() + "\n");
+          break;
+        case BATTLE_UPDATE:
+          // Actualizar lista de batallas para el cliente
+          System.out.println("[" + (isHost ? "HOST" : "CLIENTE") + "] Recibido BATTLE_UPDATE: " + message.getData());
+          System.out.println("[" + (isHost ? "HOST" : "CLIENTE") + "] isHost=" + isHost + ", procesará: " + !isHost);
+          if (!isHost) {
+            handleBattleUpdate(message.getData());
+          } else {
+            System.out.println("[HOST] Ignorando BATTLE_UPDATE propio");
+          }
+          break;
+        default:
+          break;
+      }
+    });
   }
 
   private void resetClans() {
@@ -193,10 +237,30 @@ public class MultiplayerWarController extends JFrame {
     allBattles.clear();
     battleWinners.clear();
     battleFrames.clear();
-    pairNewBattles();
+    pairNewBattles(false); // false = no enviar a cliente durante inicialización
+  }
+  
+  public void syncBattlesToClient() {
+    // Enviar todas las batallas existentes al cliente
+    if (client != null && isHost) {
+      System.out.println("[HOST] Sincronizando " + allBattles.size() + " batallas al cliente");
+      for (int i = 0; i < allBattles.size(); i++) {
+        InteractiveBattle battle = allBattles.get(i);
+        if (battle != null) {
+          String battleData = serializeBattle(battle, i);
+          System.out.println("[HOST] Enviando BATTLE_UPDATE: " + battleData);
+          Message msg = new Message(Message.Type.BATTLE_UPDATE, battleData);
+          client.sendMessage(msg);
+        }
+      }
+    }
   }
 
   private void pairNewBattles() {
+    pairNewBattles(true); // Por defecto sí enviar al cliente
+  }
+  
+  private void pairNewBattles(boolean sendToClient) {
     while (!isWarOver() && !clan1.getActiveArmies().isEmpty() && !clan2.getActiveArmies().isEmpty()) {
       Army a1 = selectArmy(clan1);
       Army a2 = selectArmy(clan2);
@@ -208,8 +272,17 @@ public class MultiplayerWarController extends JFrame {
 
       InteractiveBattle battle = new InteractiveBattle(a1, a2);
       battle.initBattle();
-      battleListModel.addElement(getBattleDescription(battle));
+      String battleDesc = getBattleDescription(battle);
+      battleListModel.addElement(battleDesc);
       allBattles.add(battle);
+      
+      // Sincronizar batalla completa al cliente solo si se solicita
+      if (sendToClient && client != null) {
+        String battleData = serializeBattle(battle, allBattles.size() - 1);
+        System.out.println("[HOST] Enviando BATTLE_UPDATE: " + battleData);
+        Message msg = new Message(Message.Type.BATTLE_UPDATE, battleData);
+        client.sendMessage(msg);
+      }
     }
     if (isWarOver()) {
       Clan winClan = clan1.isDefeated() ? clan2 : clan1;
@@ -255,17 +328,32 @@ public class MultiplayerWarController extends JFrame {
 
   private void openBattle(int index) {
     InteractiveBattle battle = getBattleByIndex(index);
-    if (battle == null || battle.isBattleOver())
+    if (battle == null)
       return;
 
     MultiplayerBattleFrame frame = battleFrames.get(battle);
     if (frame == null || !frame.isVisible()) {
-      // Determinar si este jugador controla el ejército 1 o 2
-      boolean controlsArmy1 = isHost; // El host controla ejército 1
+      // Determinar si este jugador controla el ejército 1 basándose en el clan
+      boolean controlsArmy1 = determineControlsArmy1(battle);
       frame = new MultiplayerBattleFrame(battle, this, client, controlsArmy1);
       battleFrames.put(battle, frame);
     }
     frame.setVisible(true);
+    frame.toFront();
+    
+    // Actualizar lista con indicador visual
+    updateBattleListIndicators();
+  }
+  
+  private boolean determineControlsArmy1(InteractiveBattle battle) {
+    // El jugador controla army1 si su clan (del host) tiene ese ejército
+    // Host controla clan1, Cliente controla clan2
+    Army army1 = battle.getArmy1();
+    if (isHost) {
+      return clan1.getAllArmies().contains(army1);
+    } else {
+      return clan2.getAllArmies().contains(army1);
+    }
   }
 
   public void battleFinished(InteractiveBattle battle) {
@@ -295,13 +383,8 @@ public class MultiplayerWarController extends JFrame {
     }
   }
 
-  private int getBattleIndex(InteractiveBattle battle) {
-    for (int i = 0; i < battleListModel.size(); i++) {
-      if (battleListModel.get(i).contains(battle.getArmy1().getId() + " vs " + battle.getArmy2().getId())) {
-        return i;
-      }
-    }
-    return -1;
+  public int getBattleIndex(InteractiveBattle battle) {
+    return allBattles.indexOf(battle);
   }
 
   private InteractiveBattle getBattleByIndex(int index) {
@@ -344,5 +427,172 @@ public class MultiplayerWarController extends JFrame {
       chatArea.append(message + "\n");
       chatArea.setCaretPosition(chatArea.getDocument().getLength());
     });
+  }
+  
+  private String serializeBattle(InteractiveBattle battle, int index) {
+    // Formato: index|clan1Army|army1Id|clan2Army|army2Id|description
+    // clan1Army/clan2Army indica de qué clan viene cada ejército (1 o 2)
+    StringBuilder sb = new StringBuilder();
+    sb.append(index).append("|");
+    
+    Army army1 = battle.getArmy1();
+    Army army2 = battle.getArmy2();
+    
+    System.out.println("[HOST] Serializando batalla " + index + ": " + army1.getId() + " vs " + army2.getId());
+    System.out.println("[HOST] Army1 clan: " + army1.getClan().getName() + ", Army2 clan: " + army2.getClan().getName());
+    
+    // Determinar de qué clan es cada ejército
+    int clan1Index = clan1.getAllArmies().contains(army1) ? 1 : 2;
+    int clan2Index = clan1.getAllArmies().contains(army2) ? 1 : 2;
+    
+    System.out.println("[HOST] clan1Index=" + clan1Index + ", clan2Index=" + clan2Index);
+    
+    sb.append(clan1Index).append("|");
+    sb.append(army1.getId()).append("|");
+    sb.append(clan2Index).append("|");
+    sb.append(army2.getId()).append("|");
+    sb.append(getBattleDescription(battle));
+    
+    String result = sb.toString();
+    System.out.println("[HOST] Resultado serialización: " + result);
+    return result;
+  }
+  
+  private void handleBattleUpdate(String data) {
+    try {
+      System.out.println("[CLIENTE] handleBattleUpdate llamado con data: " + data);
+      String[] parts = data.split("\\|", 7);
+      System.out.println("[CLIENTE] Parts divididos: " + parts.length);
+      if (parts.length < 6) {
+        System.err.println("[CLIENTE] Error: datos insuficientes, solo " + parts.length + " partes");
+        return;
+      }
+      
+      int index = Integer.parseInt(parts[0]);
+      int clan1Index = Integer.parseInt(parts[1]);
+      String army1Id = parts[2];
+      int clan2Index = Integer.parseInt(parts[3]);
+      String army2Id = parts[4];
+      String description = parts[5];
+      
+      System.out.println("[CLIENTE] Buscando ejércitos: clan" + clan1Index + "." + army1Id + " y clan" + clan2Index + "." + army2Id);
+      
+      // Buscar los ejércitos en el clan correcto
+      Army a1 = findArmyById(clan1Index == 1 ? clan1 : clan2, army1Id);
+      Army a2 = findArmyById(clan2Index == 1 ? clan1 : clan2, army2Id);
+      
+      System.out.println("[CLIENTE] Ejércitos encontrados: a1=" + (a1 != null ? a1.getId() : "null") + ", a2=" + (a2 != null ? a2.getId() : "null"));
+      
+      if (a1 != null && a2 != null) {
+        // Crear la batalla en el cliente
+        InteractiveBattle battle = new InteractiveBattle(a1, a2);
+        battle.initBattle();
+        
+        // Asegurar que el índice sea correcto
+        while (allBattles.size() <= index) {
+          allBattles.add(null);
+        }
+        allBattles.set(index, battle);
+        
+        // Actualizar la lista visual
+        while (battleListModel.size() <= index) {
+          battleListModel.addElement("");
+        }
+        battleListModel.set(index, description);
+        
+        System.out.println("[CLIENTE] Batalla creada en índice " + index + ": " + description);
+        System.out.println("[CLIENTE] Total batallas ahora: " + allBattles.size());
+      } else {
+        System.err.println("[CLIENTE] No se pudieron encontrar los ejércitos");
+      }
+    } catch (Exception e) {
+      e.printStackTrace();
+      System.err.println("Error al procesar actualización de batalla: " + e.getMessage());
+    }
+  }
+  
+  private Army findArmyById(Clan clan, String armyId) {
+    for (Army army : clan.getAllArmies()) {
+      if (army.getId().equals(armyId)) {
+        return army;
+      }
+    }
+    return null;
+  }
+  
+  private void handleRemoteAttack(String attackData) {
+    try {
+      System.out.println("[" + (isHost ? "HOST" : "CLIENTE") + "] handleRemoteAttack llamado con: " + attackData);
+      String[] parts = attackData.split("\\|");
+      if (parts.length < 7) {
+        System.err.println("[ERROR] Datos de ataque incompletos: " + parts.length + " partes");
+        return;
+      }
+      
+      int battleIndex = Integer.parseInt(parts[0]);
+      String remainingData = attackData.substring(attackData.indexOf("|") + 1);
+      
+      System.out.println("[" + (isHost ? "HOST" : "CLIENTE") + "] Buscando batalla con índice: " + battleIndex);
+      
+      // Obtener la batalla
+      InteractiveBattle battle = getBattleByIndex(battleIndex);
+      if (battle == null) {
+        System.err.println("[ERROR] No se encontró batalla en índice " + battleIndex + ". Total batallas: " + allBattles.size());
+        return;
+      }
+      
+      System.out.println("[" + (isHost ? "HOST" : "CLIENTE") + "] Batalla encontrada. Verificando ventana...");
+      
+      // Obtener o crear la ventana de batalla
+      MultiplayerBattleFrame frame = battleFrames.get(battle);
+      boolean needsCreate = (frame == null);
+      
+      if (needsCreate) {
+        System.out.println("[" + (isHost ? "HOST" : "CLIENTE") + "] Creando nueva ventana de batalla");
+        boolean controlsArmy1 = determineControlsArmy1(battle);
+        frame = new MultiplayerBattleFrame(battle, this, client, controlsArmy1);
+        battleFrames.put(battle, frame);
+      }
+      
+      System.out.println("[" + (isHost ? "HOST" : "CLIENTE") + "] Enviando ataque a la ventana");
+      
+      // Enviar el ataque a la ventana
+      frame.handleRemoteAttack(remainingData);
+      
+      // Siempre mostrar y traer al frente cuando llega un ataque
+      frame.setVisible(true);
+      frame.toFront();
+      
+      if (needsCreate) {
+        // Notificar que se abrió automáticamente
+        addChatMessage("[Sistema] Se abrió la batalla donde jugó tu oponente");
+      }
+      
+      updateBattleListIndicators();
+    } catch (Exception e) {
+      e.printStackTrace();
+      System.err.println("Error al procesar ataque remoto: " + e.getMessage());
+    }
+  }
+  
+  private void updateBattleListIndicators() {
+    // Marcar batallas abiertas con indicador visual
+    for (int i = 0; i < allBattles.size(); i++) {
+      InteractiveBattle battle = allBattles.get(i);
+      if (battle == null) continue;
+      
+      String baseDesc = getBattleDescription(battle);
+      
+      MultiplayerBattleFrame frame = battleFrames.get(battle);
+      if (frame != null && frame.isVisible()) {
+        if (!baseDesc.startsWith("▶ ")) {
+          battleListModel.set(i, "▶ " + baseDesc);
+        }
+      } else {
+        if (baseDesc.startsWith("▶ ")) {
+          battleListModel.set(i, baseDesc.substring(2));
+        }
+      }
+    }
   }
 }

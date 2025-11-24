@@ -3,7 +3,7 @@ package com.battlesimulator.ui;
 import com.battlesimulator.database.DatabaseManager;
 import com.battlesimulator.database.User;
 import com.battlesimulator.database.UserStats;
-import com.battlesimulator.domain.Clan;
+import com.battlesimulator.domain.*;
 import com.battlesimulator.network.GameClient;
 import com.battlesimulator.network.GameServer;
 import com.battlesimulator.network.Message;
@@ -11,6 +11,7 @@ import com.battlesimulator.usecases.MultiplayerWarController;
 import com.battlesimulator.usecases.WarController;
 import java.awt.*;
 import java.sql.SQLException;
+import java.util.Random;
 import javax.swing.*;
 
 public class MainFrame extends JFrame {
@@ -30,6 +31,10 @@ public class MainFrame extends JFrame {
   private boolean isMultiplayer = false;
   private boolean isHost = false;
   private User currentUser;
+  private MultiplayerWarController activeMultiplayerController;
+  @SuppressWarnings("unused")
+  private String myPlayerId;
+  private String myUsername;
 
   public MainFrame() {
     setTitle("BATALLA DE CLANES");
@@ -37,6 +42,19 @@ public class MainFrame extends JFrame {
     setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
     setLayout(new BorderLayout());
     UITheme.styleFrame(this);
+    
+    // Cerrar recursos al cerrar la ventana
+    addWindowListener(new java.awt.event.WindowAdapter() {
+      @Override
+      public void windowClosing(java.awt.event.WindowEvent e) {
+        if (server != null) {
+          server.stop();
+        }
+        if (client != null) {
+          client.disconnect();
+        }
+      }
+    });
     
     // Panel superior con título épico
     JPanel headerPanel = new JPanel(new BorderLayout());
@@ -154,6 +172,16 @@ public class MainFrame extends JFrame {
   
   private void hostGame() {
     try {
+      // Cerrar servidor existente si hay uno
+      if (server != null) {
+        try {
+          server.stop();
+          Thread.sleep(500); // Esperar a que el puerto se libere
+        } catch (Exception e) {
+          // Ignorar errores al cerrar
+        }
+      }
+      
       server = new GameServer(new GameServer.ServerListener() {
         @Override
         public void onPlayerConnected(String playerId) {
@@ -187,13 +215,28 @@ public class MainFrame extends JFrame {
       // Auto-conectar como host
       client = new GameClient(new GameClient.MessageListener() {
         @Override
-        public void onMessageReceived(Message message) {}
+        public void onMessageReceived(Message message) {
+          if (activeMultiplayerController != null) {
+            activeMultiplayerController.handleNetworkMessage(message);
+          }
+        }
         
         @Override
         public void onConnected(String playerId) {
+          myPlayerId = playerId;
+          myUsername = currentUser != null ? currentUser.getUsername() : "Host";
+          
           SwingUtilities.invokeLater(() -> {
-            statusLabel.setText("Host - ID: " + playerId + " | Esperando jugador...");
+            statusLabel.setText("Host - " + myUsername + " | Esperando jugador...");
             statusLabel.setForeground(UITheme.ACCENT_GOLD);
+            
+            // Cuando se conecta un jugador, notificar al host
+            if (server != null && server.getConnectedPlayers() > 1) {
+              statusLabel.setText("Host - " + myUsername + " | Jugador conectado!");
+              JOptionPane.showMessageDialog(MainFrame.this,
+                "¡Un jugador se ha unido!\nYa puedes configurar los clanes.",
+                "Jugador Conectado", JOptionPane.INFORMATION_MESSAGE);
+            }
           });
         }
         
@@ -219,18 +262,34 @@ public class MainFrame extends JFrame {
         }
       });
       
-      if (client.connect("localhost", 5555)) {
+      int actualPort = server.getActualPort();
+      if (client.connect("localhost", actualPort)) {
         isMultiplayer = true;
         isHost = true;
         hostBtn.setEnabled(false);
         joinBtn.setEnabled(false);
+        configBtn.setEnabled(true);
         JOptionPane.showMessageDialog(this, 
-          "Servidor creado. Esperando que otro jugador se conecte a tu IP en el puerto 5555",
+          "Servidor creado en puerto " + actualPort + ".\n" +
+          "Esperando que otro jugador se conecte...\n" +
+          "Como HOST, configura los clanes y inicia la guerra cuando estés listo.\n\n" +
+          "Otros jugadores deben conectarse a localhost:" + actualPort,
           "Servidor Activo", JOptionPane.INFORMATION_MESSAGE);
       }
     } catch (Exception e) {
-      JOptionPane.showMessageDialog(this, "Error al crear servidor: " + e.getMessage(), 
+      e.printStackTrace();
+      String errorMsg = e.getMessage();
+      if (errorMsg.contains("Address already in use") || errorMsg.contains("bind")) {
+        errorMsg = "El puerto está ocupado. Cierra otras instancias del juego o reinicia la aplicación.\n\nDetalles: " + errorMsg;
+      }
+      JOptionPane.showMessageDialog(this, "Error al crear servidor: " + errorMsg, 
         "Error", JOptionPane.ERROR_MESSAGE);
+      
+      // Limpiar servidor fallido
+      if (server != null) {
+        server.stop();
+        server = null;
+      }
     }
   }
   
@@ -239,12 +298,32 @@ public class MainFrame extends JFrame {
     if (host != null && !host.trim().isEmpty()) {
       client = new GameClient(new GameClient.MessageListener() {
         @Override
-        public void onMessageReceived(Message message) {}
+        public void onMessageReceived(Message message) {
+          // Manejar mensajes específicos antes de pasar al controller
+          if (message.getType() == Message.Type.CLAN_CONFIG && !isHost) {
+            handleClanConfig(message.getData());
+          } else if (message.getType() == Message.Type.START_WAR && !isHost) {
+            // El cliente recibe la señal de inicio de guerra
+            SwingUtilities.invokeLater(() -> {
+              if (clan1 != null && clan2 != null) {
+                activeMultiplayerController = new MultiplayerWarController(clan1, clan2, client, isHost, currentUser, myUsername);
+                activeMultiplayerController.setVisible(true);
+              }
+            });
+          }
+          
+          if (activeMultiplayerController != null) {
+            activeMultiplayerController.handleNetworkMessage(message);
+          }
+        }
         
         @Override
         public void onConnected(String playerId) {
+          myPlayerId = playerId;
+          myUsername = currentUser != null ? currentUser.getUsername() : "Jugador";
+          
           SwingUtilities.invokeLater(() -> {
-            statusLabel.setText("Conectado - ID: " + playerId);
+            statusLabel.setText("Conectado - " + myUsername);
             statusLabel.setForeground(UITheme.ACCENT_GOLD);
           });
         }
@@ -275,7 +354,11 @@ public class MainFrame extends JFrame {
         isHost = false;
         hostBtn.setEnabled(false);
         joinBtn.setEnabled(false);
-        JOptionPane.showMessageDialog(this, "Conectado exitosamente!", 
+        configBtn.setEnabled(false);
+        startBtn.setEnabled(false);
+        JOptionPane.showMessageDialog(this, 
+          "Conectado exitosamente al servidor!\n" +
+          "Esperando que el host configure y comience la partida...", 
           "Conexión Exitosa", JOptionPane.INFORMATION_MESSAGE);
       } else {
         JOptionPane.showMessageDialog(this, "No se pudo conectar al servidor", 
@@ -287,21 +370,44 @@ public class MainFrame extends JFrame {
   private void switchToLocal() {
     if (client != null) {
       client.disconnect();
+      client = null;
     }
     if (server != null) {
       server.stop();
+      server = null;
     }
     isMultiplayer = false;
     isHost = false;
     hostBtn.setEnabled(true);
     joinBtn.setEnabled(true);
     statusLabel.setText("Modo: Local");
+    statusLabel.setForeground(UITheme.ACCENT_GOLD);
   }
   
   private void startWar() {
     if (clan1 != null && clan2 != null) {
       if (isMultiplayer && client != null) {
-        new MultiplayerWarController(clan1, clan2, client, isHost, currentUser).setVisible(true);
+        // Si es host, enviar señal de inicio al cliente
+        if (isHost && server != null) {
+          Message msg = new Message(Message.Type.START_WAR, "START");
+          server.broadcast(msg);
+        }
+        
+        activeMultiplayerController = new MultiplayerWarController(clan1, clan2, client, isHost, currentUser, myUsername);
+        activeMultiplayerController.setVisible(true);
+        
+        // Si es host, sincronizar batallas al cliente después de un pequeño delay
+        // para asegurar que el cliente ya creó su controlador
+        if (isHost) {
+          SwingUtilities.invokeLater(() -> {
+            try {
+              Thread.sleep(500); // Esperar 500ms para que el cliente esté listo
+            } catch (InterruptedException e) {
+              e.printStackTrace();
+            }
+            activeMultiplayerController.syncBattlesToClient();
+          });
+        }
       } else {
         new WarController(clan1, clan2, currentUser).setVisible(true);
       }
@@ -312,7 +418,26 @@ public class MainFrame extends JFrame {
     this.clan1 = c1;
     this.clan2 = c2;
     startBtn.setEnabled(true);
-    JOptionPane.showMessageDialog(this, "Clanes configurados correctamente. Puedes iniciar la guerra.");
+    
+    // Si es host en multijugador, enviar configuración al cliente
+    if (isMultiplayer && isHost && client != null && server != null) {
+      // Serializar clanes y enviar al cliente
+      try {
+        String clanData = serializeClans(c1, c2);
+        Message msg = new Message(Message.Type.CLAN_CONFIG, clanData);
+        server.broadcast(msg);
+        JOptionPane.showMessageDialog(this, 
+          "Clanes configurados correctamente.\n" +
+          "Configuración enviada al cliente.\n" +
+          "Puedes iniciar la guerra cuando estés listo.");
+      } catch (Exception e) {
+        JOptionPane.showMessageDialog(this, 
+          "Error al enviar configuración: " + e.getMessage(),
+          "Error", JOptionPane.ERROR_MESSAGE);
+      }
+    } else {
+      JOptionPane.showMessageDialog(this, "Clanes configurados correctamente. Puedes iniciar la guerra.");
+    }
   }
   
   private void showLoginDialog() {
@@ -363,18 +488,125 @@ public class MainFrame extends JFrame {
       "Confirmar", JOptionPane.YES_NO_OPTION);
     
     if (option == JOptionPane.YES_OPTION) {
+      // Desconectar de multijugador si está activo
+      switchToLocal();
+      
+      // Reiniciar estado
       currentUser = null;
       userLabel.setText("Invitado");
       statsBtn.setEnabled(false);
       logoutBtn.setEnabled(false);
-      JOptionPane.showMessageDialog(this, 
-        "Sesión cerrada. Inicia sesión para guardar tus estadísticas.",
-        "Sesión Cerrada", JOptionPane.INFORMATION_MESSAGE);
+      clan1 = null;
+      clan2 = null;
+      startBtn.setEnabled(false);
+      
+      // Mostrar login nuevamente
+      SwingUtilities.invokeLater(() -> showLoginDialog());
     }
   }
   
   public User getCurrentUser() {
     return currentUser;
+  }
+  
+  private String serializeClans(Clan c1, Clan c2) {
+    // Formato: nombre1|color1_r_g_b|numArmies1|numWarriorsPerArmy1;nombre2|color2_r_g_b|numArmies2|numWarriorsPerArmy2
+    StringBuilder sb = new StringBuilder();
+    sb.append(c1.getName()).append("|");
+    sb.append(c1.getColor().getRed()).append("_").append(c1.getColor().getGreen()).append("_").append(c1.getColor().getBlue()).append("|");
+    sb.append(c1.getAllArmies().size()).append("|");
+    sb.append(c1.getAllArmies().get(0).getAllWarriors().size());
+    sb.append(";");
+    sb.append(c2.getName()).append("|");
+    sb.append(c2.getColor().getRed()).append("_").append(c2.getColor().getGreen()).append("_").append(c2.getColor().getBlue()).append("|");
+    sb.append(c2.getAllArmies().size()).append("|");
+    sb.append(c2.getAllArmies().get(0).getAllWarriors().size());
+    return sb.toString();
+  }
+  
+  private void handleClanConfig(String clanData) {
+    try {
+      String[] clans = clanData.split(";");
+      if (clans.length != 2) return;
+      
+      // Parsear clan 1
+      String[] c1Parts = clans[0].split("\\|");
+      String name1 = c1Parts[0];
+      String[] rgb1 = c1Parts[1].split("_");
+      Color color1 = new Color(Integer.parseInt(rgb1[0]), Integer.parseInt(rgb1[1]), Integer.parseInt(rgb1[2]));
+      int armies1 = Integer.parseInt(c1Parts[2]);
+      int warriors1 = Integer.parseInt(c1Parts[3]);
+      
+      // Parsear clan 2
+      String[] c2Parts = clans[1].split("\\|");
+      String name2 = c2Parts[0];
+      String[] rgb2 = c2Parts[1].split("_");
+      Color color2 = new Color(Integer.parseInt(rgb2[0]), Integer.parseInt(rgb2[1]), Integer.parseInt(rgb2[2]));
+      int armies2 = Integer.parseInt(c2Parts[2]);
+      int warriors2 = Integer.parseInt(c2Parts[3]);
+      
+      // Crear clanes usando la lógica de ConfigDialog
+      clan1 = createClanFromConfig(name1, color1, armies1, warriors1);
+      clan2 = createClanFromConfig(name2, color2, armies2, warriors2);
+      
+      SwingUtilities.invokeLater(() -> {
+        statusLabel.setText("Configuración recibida del host: " + name1 + " vs " + name2);
+        statusLabel.setForeground(Color.GREEN);
+      });
+    } catch (Exception e) {
+      e.printStackTrace();
+      JOptionPane.showMessageDialog(this,
+        "Error al recibir configuración del host: " + e.getMessage(),
+        "Error", JOptionPane.ERROR_MESSAGE);
+    }
+  }
+  
+  private Clan createClanFromConfig(String name, Color color, int numArmies, int numWarriorsPerArmy) {
+    Clan clan = new Clan(name);
+    clan.setColor(color);
+    Random rand = new Random();
+    
+    for (int i = 0; i < numArmies; i++) {
+      Army army = new Army();
+      army.setId(String.valueOf((char) ('A' + i)));
+      army.setClan(clan);
+      
+      for (int j = 1; j <= numWarriorsPerArmy; j++) {
+        double typeRand = rand.nextDouble();
+        Element elem = Element.values()[1 + rand.nextInt(4)];
+        int wDmg = 10 + rand.nextInt(15);
+        
+        IWeapon weapon;
+        if (typeRand < 0.4) {
+          weapon = new MeleeWeapon(wDmg, elem);
+        } else if (typeRand < 0.7) {
+          weapon = new RangedWeapon(wDmg, elem);
+        } else {
+          weapon = new MagicWeapon(wDmg, elem);
+        }
+        
+        int h = 70 + rand.nextInt(50);
+        int s = 5 + rand.nextInt(25);
+        int str = 5 + rand.nextInt(15);
+        String wName = army.getId() + j;
+        
+        IWarrior warrior;
+        if (weapon instanceof MeleeWeapon) {
+          warrior = new MeleeWarrior(wName, h, s, str, elem, weapon);
+        } else if (weapon instanceof RangedWeapon) {
+          warrior = new RangedWarrior(wName, h, s, str, elem, weapon);
+        } else {
+          warrior = new MagicWarrior(wName, h, s, str, elem, weapon);
+        }
+        
+        warrior.setArmyId(army.getId());
+        warrior.setNumber(j);
+        warrior.setClan(clan);
+        army.addWarrior(warrior);
+      }
+      clan.addArmy(army);
+    }
+    return clan;
   }
   
   @Override

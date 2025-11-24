@@ -85,7 +85,7 @@ public class InteractiveBattle {
         + ". " + target.getId() + ": " + healthBefore + " -> " + target.getHealth() + killedStr;
   }
 
-  private void nextTurn() {
+  public void nextTurn() {
     currentTurnArmy = (currentTurnArmy == army1 ? army2 : army1);
   }
 
@@ -131,5 +131,19 @@ public class InteractiveBattle {
 
   public String getTurnDescription() {
     return "Turno: Ejército " + currentTurnArmy.getId() + " (" + currentTurnArmy.getClan().getName() + ")";
+  }
+  
+  public IWarrior findWarriorById(String warriorId) {
+    for (IWarrior w : army1.getAllWarriors()) {
+      if (w.getId().equals(warriorId)) {
+        return w;
+      }
+    }
+    for (IWarrior w : army2.getAllWarriors()) {
+      if (w.getId().equals(warriorId)) {
+        return w;
+      }
+    }
+    return null;
   }
 }

@@ -17,12 +17,15 @@ public class Message implements Serializable {
     // Sincronización
     SYNC_REQUEST, SYNC_RESPONSE,
     // Chat
-    CHAT
+    CHAT,
+    // Turnos
+    TURN_END
   }
   
   private Type type;
   private String data;
   private String playerId;
+  private String username;
   private long timestamp;
   
   public Message() {
@@ -64,6 +67,14 @@ public class Message implements Serializable {
   
   public void setPlayerId(String playerId) {
     this.playerId = playerId;
+  }
+  
+  public String getUsername() {
+    return username;
+  }
+  
+  public void setUsername(String username) {
+    this.username = username;
   }
   
   public long getTimestamp() {

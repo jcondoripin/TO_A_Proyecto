@@ -29,9 +29,33 @@ public class GameServer {
   }
   
   public void start() throws IOException {
-    serverSocket = new ServerSocket(PORT);
-    running = true;
-    System.out.println("Servidor iniciado en puerto " + PORT);
+    int port = PORT;
+    int attempts = 0;
+    IOException lastException = null;
+    
+    // Intentar hasta 5 puertos diferentes
+    while (attempts < 5) {
+      try {
+        serverSocket = new ServerSocket();
+        serverSocket.setReuseAddress(true);
+        serverSocket.bind(new java.net.InetSocketAddress(port));
+        running = true;
+        System.out.println("Servidor iniciado en puerto " + port);
+        break; // Éxito, salir del bucle
+      } catch (IOException e) {
+        lastException = e;
+        if (serverSocket != null && !serverSocket.isClosed()) {
+          try { serverSocket.close(); } catch (Exception ex) {}
+        }
+        port++; // Intentar con el siguiente puerto
+        attempts++;
+        System.err.println("Puerto " + port + " ocupado, intentando puerto " + (port + 1));
+      }
+    }
+    
+    if (!running) {
+      throw new IOException("No se pudo iniciar el servidor después de " + attempts + " intentos", lastException);
+    }
     
     new Thread(() -> {
       while (running) {
@@ -57,12 +81,18 @@ public class GameServer {
   public void stop() {
     running = false;
     try {
+      // Cerrar todos los clientes primero
       for (ClientHandler client : clients.values()) {
         client.close();
       }
+      clients.clear();
+      
+      // Cerrar el socket del servidor
       if (serverSocket != null && !serverSocket.isClosed()) {
         serverSocket.close();
       }
+      
+      System.out.println("Servidor detenido y puerto liberado");
     } catch (IOException e) {
       e.printStackTrace();
     }
@@ -106,6 +136,13 @@ public class GameServer {
   
   public Set<String> getPlayerIds() {
     return new HashSet<>(clients.keySet());
+  }
+  
+  public int getActualPort() {
+    if (serverSocket != null && serverSocket.isBound()) {
+      return serverSocket.getLocalPort();
+    }
+    return PORT;
   }
   
   class ClientHandler implements Runnable {
@@ -165,6 +202,24 @@ public class GameServer {
             listener.onAttackReceived(clientId, msg.getData());
           }
           // Broadcast a todos
+          broadcast(msg);
+          break;
+        case BATTLE_UPDATE:
+          // Retransmitir actualización de batalla a todos los clientes
+          System.out.println("[SERVER] Retransmitiendo BATTLE_UPDATE: " + msg.getData());
+          broadcast(msg);
+          break;
+        case BATTLE_END:
+          // Retransmitir fin de batalla
+          broadcast(msg);
+          break;
+        case WAR_END:
+          // Retransmitir fin de guerra
+          broadcast(msg);
+          break;
+        case TURN_END:
+          // Retransmitir fin de turno
+          System.out.println("[SERVER] Retransmitiendo TURN_END de " + msg.getUsername());
           broadcast(msg);
           break;
         case CHAT:

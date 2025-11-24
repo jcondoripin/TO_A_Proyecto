@@ -27,8 +27,8 @@ public class GameClient {
   public boolean connect(String host, int port) {
     try {
       socket = new Socket();
-      socket.connect(new InetSocketAddress(host, port), 5000); // 5 second timeout
-      socket.setSoTimeout(30000); // 30 second read timeout
+      socket.connect(new InetSocketAddress(host, port), 10000); // 10 second timeout
+      socket.setSoTimeout(0); // Infinite read timeout - no timeout during game
       in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
       out = new PrintWriter(socket.getOutputStream(), true);
       connected = true;
