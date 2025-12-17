@@ -183,7 +183,13 @@ public class GameServer {
     }
     
     private void handleMessage(Message msg) {
-      msg.setPlayerId(clientId);
+      // Guardar el playerId original si ya viene establecido
+      String originalPlayerId = msg.getPlayerId();
+      // Si no tiene playerId, usar el clientId del handler
+      if (originalPlayerId == null || originalPlayerId.isEmpty()) {
+        msg.setPlayerId(clientId);
+      }
+      System.out.println("[SERVER] Mensaje recibido de " + clientId + ": " + msg.getType() + " playerId=" + msg.getPlayerId());
       
       switch (msg.getType()) {
         case CLAN_CONFIG:

@@ -129,4 +129,9 @@ public abstract class Warrior implements IWarrior {
     weapon.reset();
     position = null;
   }
+  
+  @Override
+  public void setHealth(int health) {
+    this.health = Math.max(0, health);
+  }
 }

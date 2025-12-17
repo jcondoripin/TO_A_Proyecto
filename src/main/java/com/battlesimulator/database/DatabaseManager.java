@@ -73,7 +73,7 @@ public class DatabaseManager {
     String passwordHash = BCrypt.hashpw(password, BCrypt.gensalt());
     String sql = "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)";
     
-    try (PreparedStatement pstmt = connection.prepareStatement(sql, new String[]{"id"})) {
+    try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
       pstmt.setString(1, username.trim());
       pstmt.setString(2, passwordHash);
       pstmt.setString(3, LocalDateTime.now().toString());
@@ -83,9 +83,11 @@ public class DatabaseManager {
         throw new SQLException("Error al crear usuario");
       }
       
-      try (ResultSet generatedKeys = pstmt.getGeneratedKeys()) {
-        if (generatedKeys.next()) {
-          int userId = generatedKeys.getInt("id");
+      // Obtener el ID del usuario recién creado usando last_insert_rowid()
+      try (Statement stmt = connection.createStatement();
+           ResultSet rs = stmt.executeQuery("SELECT last_insert_rowid()")) {
+        if (rs.next()) {
+          int userId = rs.getInt(1);
           
           // Crear stats iniciales
           String statsSql = "INSERT INTO stats (user_id, wins, losses, total_battles) VALUES (?, 0, 0, 0)";

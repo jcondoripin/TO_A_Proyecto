@@ -157,6 +157,7 @@ public class MultiplayerBattleFrame extends JDialog {
               clicked.getHealth(),
               dr.isKilled());
             Message msg = new Message(Message.Type.ATTACK, attackData);
+            msg.setPlayerId(client.getPlayerId()); // Marcar quién envió el ataque
             client.sendMessage(msg);
           }
           
@@ -164,13 +165,9 @@ public class MultiplayerBattleFrame extends JDialog {
           refreshGrid();
           updateTurnLabel();
           
-          // Cerrar la ventana después de jugar
-          if (!battleCtrl.isBattleOver()) {
-            SwingUtilities.invokeLater(() -> {
-              setVisible(false);
-              dispose();
-            });
-          }
+          // Mantener la ventana abierta pero indicar que no es tu turno
+          // El jugador puede cerrar manualmente si quiere
+          System.out.println("[LOCAL] Ataque completado. Turno actual: " + battleCtrl.getCurrentTurnArmy().getId());
           
           if (battleCtrl.isBattleOver()) {
             JOptionPane.showMessageDialog(this,
@@ -215,6 +212,7 @@ public class MultiplayerBattleFrame extends JDialog {
 
   private void refreshGrid() {
     ImageResources imgRes = ImageResources.getInstance();
+    System.out.println("[GRID] Refrescando grid...");
     
     for (int r = 0; r < GRID_SIZE; r++) {
       for (int c = 0; c < GRID_SIZE; c++) {
@@ -222,7 +220,11 @@ public class MultiplayerBattleFrame extends JDialog {
         IWarrior w = battleCtrl.getWarriorAt(p);
         JButton btn = gridButtons[r][c];
         
-        if (w == null) {
+        // No mostrar guerreros muertos
+        if (w == null || !w.isAlive()) {
+          if (w != null && !w.isAlive()) {
+            System.out.println("[GRID] Guerrero muerto en " + p + ": " + w.getId() + " (HP:" + w.getHealth() + ")");
+          }
           btn.setText("");
           btn.setIcon(null);
           btn.setBackground(UITheme.BATTLE_GRID_EMPTY);
@@ -323,10 +325,13 @@ public class MultiplayerBattleFrame extends JDialog {
   
   private void flashAttackEffect(Position attacker, Position target, boolean killed) {
     if (attacker == null || target == null) return;
+    if (attacker.row >= GRID_SIZE || attacker.col >= GRID_SIZE) return;
+    if (target.row >= GRID_SIZE || target.col >= GRID_SIZE) return;
     
     JButton attackerBtn = gridButtons[attacker.row][attacker.col];
     JButton targetBtn = gridButtons[target.row][target.col];
     
+    // Guardar colores originales del botón, no del guerrero
     Color originalAttackerBg = attackerBtn.getBackground();
     Color originalTargetBg = targetBtn.getBackground();
     
@@ -338,13 +343,17 @@ public class MultiplayerBattleFrame extends JDialog {
         attackerBtn.setBackground(Color.YELLOW);
         targetBtn.setBackground(killed ? Color.RED : Color.ORANGE);
       } else {
-        attackerBtn.setBackground(originalAttackerBg);
-        targetBtn.setBackground(originalTargetBg);
+        // No restaurar colores originales, dejar que refreshGrid lo maneje
+        if (count[0] < 5) {
+          attackerBtn.setBackground(originalAttackerBg);
+          targetBtn.setBackground(originalTargetBg);
+        }
       }
       count[0]++;
       
       if (count[0] >= 6) {
         timer.stop();
+        // Refrescar grid al final para mostrar estado correcto
         refreshGrid();
       }
     });
@@ -369,14 +378,17 @@ public class MultiplayerBattleFrame extends JDialog {
         String targetId = parts[1];
         int baseDamage = Integer.parseInt(parts[2]);
         int finalDamage = Integer.parseInt(parts[3]);
-        // int remainingHealth = Integer.parseInt(parts[4]); // No usado, el da\u00f1o ya est\u00e1 en finalDamage
+        int remainingHealth = Integer.parseInt(parts[4]); // Health después del ataque
         boolean killed = Boolean.parseBoolean(parts[5]);
+        
+        System.out.println("[REMOTE] Procesando ataque: " + attackerId + " -> " + targetId);
+        System.out.println("[REMOTE] finalDamage=" + finalDamage + ", remainingHealth=" + remainingHealth + ", killed=" + killed);
         
         IWarrior attacker = battleCtrl.findWarriorById(attackerId);
         IWarrior target = battleCtrl.findWarriorById(targetId);
         
         if (attacker == null || target == null) {
-          logArea.append("Error: guerrero no encontrado\n");
+          logArea.append("Error: guerrero no encontrado (attacker=" + attackerId + ", target=" + targetId + ")\n");
           return;
         }
         
@@ -384,29 +396,50 @@ public class MultiplayerBattleFrame extends JDialog {
         Position attPos = attacker.getPosition();
         Position tarPos = target.getPosition();
         
-        // Aplicar daño al objetivo (sincronizar estado)
-        target.takeDamage(finalDamage, attacker.getWeapon().getElement());
+        System.out.println("[REMOTE] Posición atacante: " + attPos + ", Posición objetivo: " + tarPos);
+        System.out.println("[REMOTE] Target health antes: " + target.getHealth());
+        
+        // IMPORTANTE: Establecer health directamente, NO recalcular daño
+        target.setHealth(remainingHealth);
+        
+        System.out.println("[REMOTE] Target health después: " + target.getHealth() + ", isAlive: " + target.isAlive());
+        
+        // Determinar si murió basándose en el health real
+        boolean actuallyKilled = !target.isAlive();
         
         // Si fue asesinado, mover atacante a posición del objetivo
-        if (killed) {
-          battleCtrl.getWarriorAt(attPos); // Get attacker from grid
-          attacker.setPosition(tarPos);
+        if (actuallyKilled) {
+          System.out.println("[REMOTE] Procesando muerte del guerrero " + targetId);
+          // Actualizar el grid: quitar atacante de su posición, quitar target, poner atacante en pos de target
+          battleCtrl.removeFromGrid(attPos);
+          battleCtrl.removeFromGrid(tarPos);
+          // Limpiar la posición del guerrero muerto
+          target.setPosition(null);
+          // Mover atacante a la posición del objetivo
+          battleCtrl.moveWarrior(attacker, tarPos);
+          System.out.println("[REMOTE] Atacante movido a " + tarPos);
         }
         
         // IMPORTANTE: Cambiar el turno después del ataque
         battleCtrl.nextTurn();
         
-        // Generar reporte (baseDamage, multiplier, effectiveDamage, absorbed, finalDamage, killed)
-        DamageReport dr = new DamageReport(baseDamage, 1.0, baseDamage, 0, finalDamage, killed);
+        // Verificar si la batalla terminó
+        battleCtrl.checkBattleEnd();
+        
+        // Generar reporte para el log
+        DamageReport dr = new DamageReport(baseDamage, 1.0, baseDamage, 0, finalDamage, actuallyKilled);
         String logLine = generateLogLine(attacker, target, dr);
         logArea.append("[ENEMIGO] " + logLine + "\n");
         logArea.setCaretPosition(logArea.getDocument().getLength());
         
         // Efecto visual
-        flashAttackEffect(attPos, tarPos, killed);
+        flashAttackEffect(attPos, tarPos, actuallyKilled);
         
         refreshGrid();
         updateTurnLabel();
+        
+        System.out.println("[REMOTE] Turno después del ataque: " + battleCtrl.getCurrentTurnArmy().getId());
+        System.out.println("[REMOTE] isMyTurn después: " + isMyTurn());
         
         // Verificar si la batalla terminó
         if (battleCtrl.isBattleOver()) {
@@ -416,8 +449,6 @@ public class MultiplayerBattleFrame extends JDialog {
             "Victoria batalla", JOptionPane.INFORMATION_MESSAGE);
           winner = battleCtrl.getWinner();
           warController.battleFinished(battleCtrl);
-          // NO cerrar, mantener abierta para revisión
-          // dispose();
         }
       } catch (Exception e) {
         logArea.append("Error procesando ataque: " + e.getMessage() + "\n");

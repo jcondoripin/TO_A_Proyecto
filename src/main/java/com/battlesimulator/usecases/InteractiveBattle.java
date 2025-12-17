@@ -11,10 +11,19 @@ public class InteractiveBattle {
   private final Map<Position, IWarrior> gridPositions = new HashMap<>();
   private final List<String> logs = new ArrayList<>();
   private Army winner;
+  private long randomSeed = System.currentTimeMillis(); // Semilla para sincronización
 
   public InteractiveBattle(Army army1, Army army2) {
     this.army1 = army1;
     this.army2 = army2;
+  }
+  
+  public void setRandomSeed(long seed) {
+    this.randomSeed = seed;
+  }
+  
+  public long getRandomSeed() {
+    return randomSeed;
   }
 
   public Army getArmy1() {
@@ -28,6 +37,10 @@ public class InteractiveBattle {
   public void initBattle() {
     gridPositions.clear();
     logs.clear();
+    
+    // Usar Random con semilla fija para que ambos jugadores tengan las mismas posiciones
+    Random rand = new Random(randomSeed);
+    
     List<IWarrior> allWarriors = new ArrayList<>();
     allWarriors.addAll(army1.getWarriors());
     allWarriors.addAll(army2.getWarriors());
@@ -37,8 +50,11 @@ public class InteractiveBattle {
         positions.add(new Position(r, c));
       }
     }
-    Collections.shuffle(allWarriors);
-    Collections.shuffle(positions);
+    
+    // Usar la misma semilla para shuffle
+    Collections.shuffle(allWarriors, rand);
+    Collections.shuffle(positions, rand);
+    
     int idx = 0;
     for (IWarrior w : allWarriors) {
       if (idx >= positions.size())
@@ -63,10 +79,25 @@ public class InteractiveBattle {
     if (dr.isKilled()) {
       Position targetPos = target.getPosition();
       Position attackerPos = attacker.getPosition();
-      gridPositions.remove(targetPos);
-      gridPositions.remove(attackerPos);
+      
+      System.out.println("[LOCAL] Antes de remove - targetPos: " + targetPos + ", attackerPos: " + attackerPos);
+      System.out.println("[LOCAL] Grid contiene targetPos? " + gridPositions.containsKey(targetPos));
+      System.out.println("[LOCAL] Grid contiene attackerPos? " + gridPositions.containsKey(attackerPos));
+      
+      // Eliminar ambos del grid
+      IWarrior removedTarget = gridPositions.remove(targetPos);
+      IWarrior removedAttacker = gridPositions.remove(attackerPos);
+      
+      System.out.println("[LOCAL] Removido de targetPos: " + (removedTarget != null ? removedTarget.getId() : "null"));
+      System.out.println("[LOCAL] Removido de attackerPos: " + (removedAttacker != null ? removedAttacker.getId() : "null"));
+      
+      // Limpiar la posición del guerrero muerto
+      target.setPosition(null);
+      // Mover atacante a la posición del objetivo
       attacker.setPosition(targetPos);
       gridPositions.put(targetPos, attacker);
+      
+      System.out.println("[LOCAL] Kill completado: " + target.getId() + " eliminado, " + attacker.getId() + " ahora en " + targetPos);
     }
     addLog(generateLogLine(attacker, target, dr));
     nextTurn();
@@ -145,5 +176,30 @@ public class InteractiveBattle {
       }
     }
     return null;
+  }
+  
+  // Método para sincronizar movimiento de guerrero (usado en multijugador)
+  public void moveWarrior(IWarrior warrior, Position newPosition) {
+    Position oldPos = warrior.getPosition();
+    if (oldPos != null) {
+      gridPositions.remove(oldPos);
+    }
+    warrior.setPosition(newPosition);
+    gridPositions.put(newPosition, warrior);
+  }
+  
+  // Método para eliminar un guerrero muerto del grid
+  public void removeFromGrid(Position pos) {
+    if (pos != null) {
+      IWarrior removed = gridPositions.remove(pos);
+      if (removed != null) {
+        System.out.println("[BATTLE] Eliminado del grid: " + removed.getId() + " de posición " + pos.row + "," + pos.col);
+      }
+    }
+  }
+  
+  // Método para verificar si la batalla terminó (para sincronización)
+  public void checkBattleEnd() {
+    checkBattleOver();
   }
 }

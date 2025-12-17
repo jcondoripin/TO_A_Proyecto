@@ -35,6 +35,9 @@ public interface IWarrior {
 
   void reset();
   
+  // Para sincronización en multijugador - establece health directamente sin recalcular daño
+  void setHealth(int health);
+  
   default String getWarriorType() {
     String className = this.getClass().getSimpleName();
     if (className.contains("Melee")) return "melee";

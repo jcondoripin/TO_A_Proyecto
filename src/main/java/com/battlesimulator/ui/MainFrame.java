@@ -510,47 +510,99 @@ public class MainFrame extends JFrame {
   }
   
   private String serializeClans(Clan c1, Clan c2) {
-    // Formato: nombre1|color1_r_g_b|numArmies1|numWarriorsPerArmy1;nombre2|color2_r_g_b|numArmies2|numWarriorsPerArmy2
+    // Formato completo: serializa cada guerrero con todos sus datos
+    // Formato: clan1Data;;clan2Data
+    // Cada clan: nombre|r_g_b|army1Data~army2Data~...
+    // Cada army: armyId:warrior1Data,warrior2Data,...
+    // Cada warrior: type:health:shield:strength:element:weaponType:weaponDamage:weaponElement
     StringBuilder sb = new StringBuilder();
-    sb.append(c1.getName()).append("|");
-    sb.append(c1.getColor().getRed()).append("_").append(c1.getColor().getGreen()).append("_").append(c1.getColor().getBlue()).append("|");
-    sb.append(c1.getAllArmies().size()).append("|");
-    sb.append(c1.getAllArmies().get(0).getAllWarriors().size());
-    sb.append(";");
-    sb.append(c2.getName()).append("|");
-    sb.append(c2.getColor().getRed()).append("_").append(c2.getColor().getGreen()).append("_").append(c2.getColor().getBlue()).append("|");
-    sb.append(c2.getAllArmies().size()).append("|");
-    sb.append(c2.getAllArmies().get(0).getAllWarriors().size());
+    sb.append(serializeClan(c1));
+    sb.append(";;");
+    sb.append(serializeClan(c2));
     return sb.toString();
+  }
+  
+  private String serializeClan(Clan clan) {
+    StringBuilder sb = new StringBuilder();
+    sb.append(clan.getName()).append("|");
+    sb.append(clan.getColor().getRed()).append("_").append(clan.getColor().getGreen()).append("_").append(clan.getColor().getBlue()).append("|");
+    
+    for (int i = 0; i < clan.getAllArmies().size(); i++) {
+      Army army = clan.getAllArmies().get(i);
+      if (i > 0) sb.append("~");
+      sb.append(army.getId()).append(":");
+      
+      for (int j = 0; j < army.getAllWarriors().size(); j++) {
+        IWarrior w = army.getAllWarriors().get(j);
+        if (j > 0) sb.append(",");
+        // type:health:shield:strength:element:weaponType:weaponDamage:weaponElement
+        String wType = w.getWarriorType();
+        IWeapon weapon = w.getWeapon();
+        String weaponType = weapon.getType();
+        sb.append(wType).append(":");
+        sb.append(w.getHealth()).append(":");
+        sb.append(w.getShield()).append(":");
+        sb.append(w.getStrength()).append(":");
+        sb.append(getWarriorElement(w).name()).append(":");
+        sb.append(weaponType).append(":");
+        sb.append(getWeaponDamage(weapon)).append(":");
+        sb.append(weapon.getElement().name());
+      }
+    }
+    return sb.toString();
+  }
+  
+  private Element getWarriorElement(IWarrior w) {
+    // Usar reflexión para obtener el elemento del guerrero
+    try {
+      java.lang.reflect.Field field = Warrior.class.getDeclaredField("element");
+      field.setAccessible(true);
+      return (Element) field.get(w);
+    } catch (Exception e) {
+      return Element.NONE;
+    }
+  }
+  
+  private int getWeaponDamage(IWeapon weapon) {
+    try {
+      java.lang.reflect.Field field = Weapon.class.getDeclaredField("initialDamage");
+      field.setAccessible(true);
+      return field.getInt(weapon);
+    } catch (Exception e) {
+      return 10;
+    }
   }
   
   private void handleClanConfig(String clanData) {
     try {
-      String[] clans = clanData.split(";");
-      if (clans.length != 2) return;
+      System.out.println("[CLIENTE] Recibiendo configuración de clanes:");
+      System.out.println(clanData);
       
-      // Parsear clan 1
-      String[] c1Parts = clans[0].split("\\|");
-      String name1 = c1Parts[0];
-      String[] rgb1 = c1Parts[1].split("_");
-      Color color1 = new Color(Integer.parseInt(rgb1[0]), Integer.parseInt(rgb1[1]), Integer.parseInt(rgb1[2]));
-      int armies1 = Integer.parseInt(c1Parts[2]);
-      int warriors1 = Integer.parseInt(c1Parts[3]);
+      String[] clans = clanData.split(";;");
+      if (clans.length != 2) {
+        System.err.println("[CLIENTE] Error: se esperaban 2 clanes, se recibieron " + clans.length);
+        return;
+      }
       
-      // Parsear clan 2
-      String[] c2Parts = clans[1].split("\\|");
-      String name2 = c2Parts[0];
-      String[] rgb2 = c2Parts[1].split("_");
-      Color color2 = new Color(Integer.parseInt(rgb2[0]), Integer.parseInt(rgb2[1]), Integer.parseInt(rgb2[2]));
-      int armies2 = Integer.parseInt(c2Parts[2]);
-      int warriors2 = Integer.parseInt(c2Parts[3]);
+      // Deserializar clan 1
+      clan1 = deserializeClan(clans[0]);
+      // Deserializar clan 2
+      clan2 = deserializeClan(clans[1]);
       
-      // Crear clanes usando la lógica de ConfigDialog
-      clan1 = createClanFromConfig(name1, color1, armies1, warriors1);
-      clan2 = createClanFromConfig(name2, color2, armies2, warriors2);
+      System.out.println("[CLIENTE] Clanes deserializados:");
+      System.out.println("  Clan1: " + clan1.getName() + " con " + clan1.getAllArmies().size() + " ejércitos");
+      System.out.println("  Clan2: " + clan2.getName() + " con " + clan2.getAllArmies().size() + " ejércitos");
+      
+      // Verificar guerreros
+      for (Army army : clan1.getAllArmies()) {
+        System.out.println("    Ejército " + army.getId() + ": " + army.getAllWarriors().size() + " guerreros");
+        for (IWarrior w : army.getAllWarriors()) {
+          System.out.println("      - " + w.getId() + " (" + w.getWarriorType() + ") HP:" + w.getHealth());
+        }
+      }
       
       SwingUtilities.invokeLater(() -> {
-        statusLabel.setText("Configuración recibida del host: " + name1 + " vs " + name2);
+        statusLabel.setText("Configuración recibida: " + clan1.getName() + " vs " + clan2.getName());
         statusLabel.setForeground(Color.GREEN);
       });
     } catch (Exception e) {
@@ -561,53 +613,102 @@ public class MainFrame extends JFrame {
     }
   }
   
-  private Clan createClanFromConfig(String name, Color color, int numArmies, int numWarriorsPerArmy) {
+  private Clan deserializeClan(String clanData) {
+    // Formato: nombre|r_g_b|army1Data~army2Data~...
+    String[] parts = clanData.split("\\|", 3);
+    String name = parts[0];
+    String[] rgb = parts[1].split("_");
+    Color color = new Color(Integer.parseInt(rgb[0]), Integer.parseInt(rgb[1]), Integer.parseInt(rgb[2]));
+    
     Clan clan = new Clan(name);
     clan.setColor(color);
-    Random rand = new Random();
     
-    for (int i = 0; i < numArmies; i++) {
-      Army army = new Army();
-      army.setId(String.valueOf((char) ('A' + i)));
-      army.setClan(clan);
-      
-      for (int j = 1; j <= numWarriorsPerArmy; j++) {
-        double typeRand = rand.nextDouble();
-        Element elem = Element.values()[1 + rand.nextInt(4)];
-        int wDmg = 10 + rand.nextInt(15);
-        
-        IWeapon weapon;
-        if (typeRand < 0.4) {
-          weapon = new MeleeWeapon(wDmg, elem);
-        } else if (typeRand < 0.7) {
-          weapon = new RangedWeapon(wDmg, elem);
-        } else {
-          weapon = new MagicWeapon(wDmg, elem);
-        }
-        
-        int h = 70 + rand.nextInt(50);
-        int s = 5 + rand.nextInt(25);
-        int str = 5 + rand.nextInt(15);
-        String wName = army.getId() + j;
-        
-        IWarrior warrior;
-        if (weapon instanceof MeleeWeapon) {
-          warrior = new MeleeWarrior(wName, h, s, str, elem, weapon);
-        } else if (weapon instanceof RangedWeapon) {
-          warrior = new RangedWarrior(wName, h, s, str, elem, weapon);
-        } else {
-          warrior = new MagicWarrior(wName, h, s, str, elem, weapon);
-        }
-        
-        warrior.setArmyId(army.getId());
-        warrior.setNumber(j);
-        warrior.setClan(clan);
-        army.addWarrior(warrior);
+    if (parts.length > 2 && !parts[2].isEmpty()) {
+      String[] armiesData = parts[2].split("~");
+      for (String armyData : armiesData) {
+        Army army = deserializeArmy(armyData, clan);
+        clan.addArmy(army);
       }
-      clan.addArmy(army);
     }
+    
     return clan;
   }
+  
+  private Army deserializeArmy(String armyData, Clan clan) {
+    // Formato: armyId:warrior1Data,warrior2Data,...
+    String[] parts = armyData.split(":", 2);
+    String armyId = parts[0];
+    
+    Army army = new Army();
+    army.setId(armyId);
+    army.setClan(clan);
+    
+    if (parts.length > 1 && !parts[1].isEmpty()) {
+      String[] warriorsData = parts[1].split(",");
+      int warriorNum = 1;
+      for (String warriorData : warriorsData) {
+        IWarrior warrior = deserializeWarrior(warriorData, armyId, warriorNum, clan);
+        army.addWarrior(warrior);
+        warriorNum++;
+      }
+    }
+    
+    return army;
+  }
+  
+  private IWarrior deserializeWarrior(String warriorData, String armyId, int number, Clan clan) {
+    // Formato: type:health:shield:strength:element:weaponType:weaponDamage:weaponElement
+    String[] parts = warriorData.split(":");
+    String type = parts[0];
+    int health = Integer.parseInt(parts[1]);
+    int shield = Integer.parseInt(parts[2]);
+    int strength = Integer.parseInt(parts[3]);
+    Element element = Element.valueOf(parts[4]);
+    String weaponType = parts[5];
+    int weaponDamage = Integer.parseInt(parts[6]);
+    Element weaponElement = Element.valueOf(parts[7]);
+    
+    // Crear arma según tipo
+    IWeapon weapon;
+    switch (weaponType) {
+      case "Espada":
+        weapon = new MeleeWeapon(weaponDamage, weaponElement);
+        break;
+      case "Arco":
+        weapon = new RangedWeapon(weaponDamage, weaponElement);
+        break;
+      case "Varita mágica":
+        weapon = new MagicWeapon(weaponDamage, weaponElement);
+        break;
+      default:
+        weapon = new MeleeWeapon(weaponDamage, weaponElement);
+    }
+    
+    // Crear guerrero según tipo
+    String wName = armyId + number;
+    IWarrior warrior;
+    switch (type) {
+      case "melee":
+        warrior = new MeleeWarrior(wName, health, shield, strength, element, weapon);
+        break;
+      case "ranged":
+        warrior = new RangedWarrior(wName, health, shield, strength, element, weapon);
+        break;
+      case "magic":
+        warrior = new MagicWarrior(wName, health, shield, strength, element, weapon);
+        break;
+      default:
+        warrior = new MeleeWarrior(wName, health, shield, strength, element, weapon);
+    }
+    
+    warrior.setArmyId(armyId);
+    warrior.setNumber(number);
+    warrior.setClan(clan);
+    
+    return warrior;
+  }
+  
+  // Se eliminó createClanFromConfig - ahora usamos deserialización completa
   
   @Override
   public void setVisible(boolean visible) {
