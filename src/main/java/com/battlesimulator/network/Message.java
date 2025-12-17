@@ -11,7 +11,7 @@ public class Message implements Serializable {
     // Configuración
     CLAN_CONFIG, START_WAR,
     // Batalla
-    ATTACK, BATTLE_UPDATE, BATTLE_END,
+    ATTACK, MOVE, BATTLE_UPDATE, BATTLE_END,
     // Estado
     WAR_STATUS, WAR_END,
     // Sincronización

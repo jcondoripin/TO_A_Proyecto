@@ -29,15 +29,34 @@ public abstract class Warrior implements IWarrior {
   @Override
   public DamageReport attack(IWarrior target) {
     int baseDamage = calculateBaseDamage();
-    return target.takeDamage(baseDamage, weapon.getElement());
+    
+    // Calcular distancia y multiplicador de distancia
+    int distance = CombatRules.calculateDistance(this.position, target.getPosition());
+    double distanceMultiplier = CombatRules.getDistanceMultiplier(this, target);
+    CombatRules.AttackEfficiency efficiency = CombatRules.getAttackEfficiency(this, target);
+    
+    // Aplicar daño con multiplicador de distancia
+    return target.takeDamageWithDistance(baseDamage, weapon.getElement(), distanceMultiplier, distance, efficiency);
   }
 
   protected abstract int calculateBaseDamage();
 
   @Override
   public DamageReport takeDamage(int baseDamage, Element attackElement) {
-    double multiplier = attackElement.getDamageMultiplier(this.element);
-    int effectiveDamage = (int) (baseDamage * multiplier);
+    // Método de compatibilidad - sin modificador de distancia
+    return takeDamageWithDistance(baseDamage, attackElement, 1.0, 0, CombatRules.AttackEfficiency.NORMAL);
+  }
+  
+  @Override
+  public DamageReport takeDamageWithDistance(int baseDamage, Element attackElement, 
+                                              double distanceMultiplier, int distance,
+                                              CombatRules.AttackEfficiency efficiency) {
+    double elementMultiplier = attackElement.getDamageMultiplier(this.element);
+    
+    // Aplicar ambos multiplicadores: elemento y distancia
+    double totalMultiplier = elementMultiplier * distanceMultiplier;
+    int effectiveDamage = (int) (baseDamage * totalMultiplier);
+    
     int absorbed = Math.min(shield, effectiveDamage);
     int finalDamage = effectiveDamage - absorbed;
     shield -= absorbed;
@@ -48,7 +67,8 @@ public abstract class Warrior implements IWarrior {
       defeats++;
       weapon.upgrade();
     }
-    return new DamageReport(baseDamage, multiplier, effectiveDamage, absorbed, finalDamage, killed);
+    return new DamageReport(baseDamage, elementMultiplier, distanceMultiplier, 
+                           effectiveDamage, absorbed, finalDamage, killed, distance, efficiency);
   }
 
   @Override

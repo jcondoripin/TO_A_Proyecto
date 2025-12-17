@@ -210,6 +210,11 @@ public class GameServer {
           // Broadcast a todos
           broadcast(msg);
           break;
+        case MOVE:
+          // Broadcast movimiento a todos los clientes
+          System.out.println("[SERVER] Retransmitiendo MOVE: " + msg.getData());
+          broadcast(msg);
+          break;
         case BATTLE_UPDATE:
           // Retransmitir actualización de batalla a todos los clientes
           System.out.println("[SERVER] Retransmitiendo BATTLE_UPDATE: " + msg.getData());

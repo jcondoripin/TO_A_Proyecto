@@ -4,6 +4,11 @@ public interface IWarrior {
   DamageReport attack(IWarrior target);
 
   DamageReport takeDamage(int damage, Element attackElement);
+  
+  // Método de daño con modificadores de distancia
+  DamageReport takeDamageWithDistance(int damage, Element attackElement, 
+                                       double distanceMultiplier, int distance,
+                                       CombatRules.AttackEfficiency efficiency);
 
   boolean isAlive();
 
