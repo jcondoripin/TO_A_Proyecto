@@ -249,7 +249,12 @@ public class BattleFrame extends JDialog {
   }
 
   private String generateLogLine(IWarrior att, IWarrior tar, DamageReport dr) {
+    String attType = att.getWarriorType().toUpperCase();
+    String tarType = tar.getWarriorType().toUpperCase();
+    Position attPos = att.getPosition();
+    Position tarPos = tar.getPosition();
     String weaponStr = att.getWeapon().getName();
+    
     String effIcon = switch (dr.getEfficiency()) {
       case OPTIMAL -> "🎯";
       case NORMAL -> "✓";
@@ -257,17 +262,22 @@ public class BattleFrame extends JDialog {
       case OUT_OF_RANGE -> "✗";
     };
     
-    String distInfo = String.format("[Dist:%d %s]", dr.getDistance(), effIcon);
-    String elemMult = dr.getElementMultiplier() != 1.0 ? String.format("Elem:x%.1f ", dr.getElementMultiplier()) : "";
-    String distMult = dr.getDistanceMultiplier() != 1.0 ? String.format("Dist:x%.1f ", dr.getDistanceMultiplier()) : "";
+    String elemMult = dr.getElementMultiplier() != 1.0 ? String.format(" Elem:x%.1f", dr.getElementMultiplier()) : "";
+    String distMult = dr.getDistanceMultiplier() != 1.0 ? String.format(" Dist:x%.1f", dr.getDistanceMultiplier()) : "";
     
     int healthBefore = tar.getHealth() + dr.getFinalDamage();
     String killedStr = dr.isKilled() ? " 💀 ¡ELIMINADO!" : "";
     
-    return String.format("%s %s(%s) → %s %s| Daño:%d %s%s= %d | Escudo:-%d | HP:%d→%d%s",
-        effIcon, att.getId(), weaponStr, tar.getId(), distInfo,
-        dr.getBaseDamage(), elemMult, distMult, dr.getEffectiveDamage(),
-        dr.getAbsorbed(), healthBefore, tar.getHealth(), killedStr);
+    // Formato: [ATACANTE] Tipo en (x,y) usó Arma → [OBJETIVO] Tipo en (x,y) | Daño | Resultado
+    return String.format("%s %s [%s] en (%d,%d) usó %s → %s [%s] en (%d,%d) | Dist:%d%s%s | Daño:%d→%d | HP:%d→%d%s",
+        effIcon,
+        att.getId(), attType, attPos != null ? attPos.row : -1, attPos != null ? attPos.col : -1,
+        weaponStr,
+        tar.getId(), tarType, tarPos != null ? tarPos.row : -1, tarPos != null ? tarPos.col : -1,
+        dr.getDistance(), elemMult, distMult,
+        dr.getBaseDamage(), dr.getFinalDamage(),
+        healthBefore, tar.getHealth(),
+        killedStr);
   }
 
   private void refreshGrid() {

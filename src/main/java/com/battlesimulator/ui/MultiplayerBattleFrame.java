@@ -178,9 +178,15 @@ public class MultiplayerBattleFrame extends JDialog {
             Position oldPos = selectedAttacker.getPosition();
             IWarrior mover = selectedAttacker;
             battleCtrl.performMove(selectedAttacker, p);
-            logArea.append("🚶 " + mover.getId() + " se movió de (" + 
-                          oldPos.row + "," + oldPos.col + ") a (" + p.row + "," + p.col + ")\n");
+            String moveLog = String.format("🚶 %s [%s] se movió de (%d,%d) a (%d,%d)",
+                mover.getId(), mover.getWarriorType().toUpperCase(),
+                oldPos.row, oldPos.col, p.row, p.col);
+            logArea.append(moveLog + "\n");
             logArea.setCaretPosition(logArea.getDocument().getLength());
+            
+            // Enviar al registro de guerra
+            String battleId = battleCtrl.getArmy1().getId() + " vs " + battleCtrl.getArmy2().getId();
+            warController.addBattleLog(battleId, moveLog);
             
             // Enviar movimiento al otro jugador
             if (client != null) {
@@ -245,6 +251,10 @@ public class MultiplayerBattleFrame extends JDialog {
           String logLine = generateLogLine(attacker, clicked, dr);
           logArea.append(logLine + "\n");
           logArea.setCaretPosition(logArea.getDocument().getLength());
+          
+          // Enviar al registro de guerra
+          String battleId = battleCtrl.getArmy1().getId() + " vs " + battleCtrl.getArmy2().getId();
+          warController.addBattleLog(battleId, logLine);
           
           // Efecto visual del ataque según eficiencia
           flashAttackEffect(attPos, tarPos, dr);
@@ -315,7 +325,12 @@ public class MultiplayerBattleFrame extends JDialog {
   }
 
   private String generateLogLine(IWarrior att, IWarrior tar, DamageReport dr) {
+    String attType = att.getWarriorType().toUpperCase();
+    String tarType = tar.getWarriorType().toUpperCase();
+    Position attPos = att.getPosition();
+    Position tarPos = tar.getPosition();
     String weaponStr = att.getWeapon().getName();
+    
     String effIcon = switch (dr.getEfficiency()) {
       case OPTIMAL -> "🎯";
       case NORMAL -> "✓";
@@ -323,17 +338,22 @@ public class MultiplayerBattleFrame extends JDialog {
       case OUT_OF_RANGE -> "✗";
     };
     
-    String distInfo = String.format("[Dist:%d %s]", dr.getDistance(), effIcon);
-    String elemMult = dr.getElementMultiplier() != 1.0 ? String.format("Elem:x%.1f ", dr.getElementMultiplier()) : "";
-    String distMult = dr.getDistanceMultiplier() != 1.0 ? String.format("Dist:x%.1f ", dr.getDistanceMultiplier()) : "";
+    String elemMult = dr.getElementMultiplier() != 1.0 ? String.format(" Elem:x%.1f", dr.getElementMultiplier()) : "";
+    String distMult = dr.getDistanceMultiplier() != 1.0 ? String.format(" Dist:x%.1f", dr.getDistanceMultiplier()) : "";
     
     int healthBefore = tar.getHealth() + dr.getFinalDamage();
     String killedStr = dr.isKilled() ? " 💀 ¡ELIMINADO!" : "";
     
-    return String.format("%s %s(%s) → %s %s| Daño:%d %s%s= %d | Escudo:-%d | HP:%d→%d%s",
-        effIcon, att.getId(), weaponStr, tar.getId(), distInfo,
-        dr.getBaseDamage(), elemMult, distMult, dr.getEffectiveDamage(),
-        dr.getAbsorbed(), healthBefore, tar.getHealth(), killedStr);
+    // Formato: [ATACANTE] Tipo en (x,y) usó Arma → [OBJETIVO] Tipo en (x,y) | Daño | Resultado
+    return String.format("%s %s [%s] en (%d,%d) usó %s → %s [%s] en (%d,%d) | Dist:%d%s%s | Daño:%d→%d | HP:%d→%d%s",
+        effIcon,
+        att.getId(), attType, attPos != null ? attPos.row : -1, attPos != null ? attPos.col : -1,
+        weaponStr,
+        tar.getId(), tarType, tarPos != null ? tarPos.row : -1, tarPos != null ? tarPos.col : -1,
+        dr.getDistance(), elemMult, distMult,
+        dr.getBaseDamage(), dr.getFinalDamage(),
+        healthBefore, tar.getHealth(),
+        killedStr);
   }
 
   private void refreshGrid() {
@@ -653,6 +673,10 @@ public class MultiplayerBattleFrame extends JDialog {
         logArea.append("[ENEMIGO] " + logLine + "\n");
         logArea.setCaretPosition(logArea.getDocument().getLength());
         
+        // Enviar al registro de guerra
+        String battleId = battleCtrl.getArmy1().getId() + " vs " + battleCtrl.getArmy2().getId();
+        warController.addBattleLog(battleId, "[ENEMIGO] " + logLine);
+        
         // Efecto visual
         flashAttackEffect(attPos, tarPos, dr);
         
@@ -677,8 +701,7 @@ public class MultiplayerBattleFrame extends JDialog {
       }
     });
   }
-  
-  public void handleRemoteMove(String moveData) {
+    public void handleRemoteMove(String moveData) {
     SwingUtilities.invokeLater(() -> {
       try {
         String[] parts = moveData.split("\\|");
@@ -723,9 +746,15 @@ public class MultiplayerBattleFrame extends JDialog {
         // Cambiar turno
         battleCtrl.nextTurn();
         
-        logArea.append("[ENEMIGO] 🚶 " + warriorId + " se movió de (" + oldRow + "," + oldCol + 
-                      ") a (" + newRow + "," + newCol + ")\n");
+        String moveLog = String.format("[ENEMIGO] 🚶 %s [%s] se movió de (%d,%d) a (%d,%d)",
+            warriorId, warrior.getWarriorType().toUpperCase(),
+            oldRow, oldCol, newRow, newCol);
+        logArea.append(moveLog + "\n");
         logArea.setCaretPosition(logArea.getDocument().getLength());
+        
+        // Enviar al registro de guerra
+        String battleId = battleCtrl.getArmy1().getId() + " vs " + battleCtrl.getArmy2().getId();
+        warController.addBattleLog(battleId, moveLog);
         
         refreshGrid();
         updateTurnLabel();

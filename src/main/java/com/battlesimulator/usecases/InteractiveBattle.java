@@ -204,14 +204,22 @@ public class InteractiveBattle {
   }
 
   private String generateLogLine(IWarrior attacker, IWarrior target, DamageReport dr) {
+    String attType = attacker.getWarriorType().toUpperCase();
+    String tarType = target.getWarriorType().toUpperCase();
+    Position attPos = attacker.getPosition();
+    Position tarPos = target.getPosition();
     String weaponStr = attacker.getWeapon().getName();
     String multStr = dr.getMultiplier() != 1.0 ? " x" + String.format("%.1f", dr.getMultiplier()) : "";
     int healthBefore = target.getHealth() + dr.getFinalDamage();
-    String killedStr = dr.isKilled() ? ". ¡Muerto! " + attacker.getId() + " ocupa su posición." : "";
-    return attacker.getId() + " (" + weaponStr + ") ataca a " + target.getId() + ". Daño base: " + dr.getBaseDamage()
-        + multStr + " = " + dr.getEffectiveDamage()
-        + ". Absorbido por escudo: " + dr.getAbsorbed() + ". Daño final: " + dr.getFinalDamage()
-        + ". " + target.getId() + ": " + healthBefore + " -> " + target.getHealth() + killedStr;
+    String killedStr = dr.isKilled() ? " ¡ELIMINADO! " + attacker.getId() + " ocupa su posición." : "";
+    
+    return String.format("%s [%s] en (%d,%d) usó %s → %s [%s] en (%d,%d) | Daño:%d%s→%d | HP:%d→%d%s",
+        attacker.getId(), attType, attPos != null ? attPos.row : -1, attPos != null ? attPos.col : -1,
+        weaponStr,
+        target.getId(), tarType, tarPos != null ? tarPos.row : -1, tarPos != null ? tarPos.col : -1,
+        dr.getBaseDamage(), multStr, dr.getFinalDamage(),
+        healthBefore, target.getHealth(),
+        killedStr);
   }
 
   public void nextTurn() {

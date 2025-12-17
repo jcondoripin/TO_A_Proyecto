@@ -49,6 +49,9 @@ public class MultiplayerWarController extends JFrame {
       initializeBattles();
     }
     setupNetworkListeners();
+    
+    // Mensaje inicial en el registro de guerra
+    warLogArea.append("⚔️ GUERRA INICIADA: " + clan1.getName() + " vs " + clan2.getName() + "\n\n");
   }
 
   private void initUI() {
@@ -382,6 +385,18 @@ public class MultiplayerWarController extends JFrame {
       // Cliente controla los ejércitos del clan2
       return army1ClanName.equals(clan2.getName());
     }
+  }
+  
+  /**
+   * Agrega un log de acción al registro de guerra en tiempo real.
+   */
+  public void addBattleLog(String battleId, String logLine) {
+    System.out.println("[WAR LOG] Agregando: [" + battleId + "] " + logLine);
+    SwingUtilities.invokeLater(() -> {
+      warLogArea.append("[" + battleId + "] " + logLine + "\n");
+      warLogArea.setCaretPosition(warLogArea.getDocument().getLength());
+      warLogArea.repaint();
+    });
   }
 
   public void battleFinished(InteractiveBattle battle) {
