@@ -20,6 +20,7 @@ public class MultiplayerBattleFrame extends JDialog {
   private final JLabel turnLabel = new JLabel();
   private final JLabel rangeInfoLabel = new JLabel();
   private Army winner;
+  private JPanel turnOverlayPanel; // Panel overlay para indicar cuando no es tu turno
 
   public MultiplayerBattleFrame(InteractiveBattle battleCtrl, MultiplayerWarController warController, 
                                 GameClient client, boolean controlsArmy1) {
@@ -41,6 +42,40 @@ public class MultiplayerBattleFrame extends JDialog {
     setSize(1500, 950);
     setLayout(new BorderLayout());
     getContentPane().setBackground(UITheme.PRIMARY_DARK);
+    
+    // Configurar glass pane para overlay de turno
+    turnOverlayPanel = new JPanel() {
+      @Override
+      protected void paintComponent(Graphics g) {
+        super.paintComponent(g);
+        if (!isMyTurn()) {
+          Graphics2D g2d = (Graphics2D) g.create();
+          g2d.setColor(new Color(180, 0, 0, 80)); // Rojo semi-transparente
+          g2d.fillRect(0, 0, getWidth(), getHeight());
+          
+          // Texto indicador
+          g2d.setColor(new Color(255, 255, 255, 200));
+          g2d.setFont(new Font("Segoe UI", Font.BOLD, 32));
+          String msg = "⏳ ESPERANDO TURNO DEL OPONENTE...";
+          FontMetrics fm = g2d.getFontMetrics();
+          int x = (getWidth() - fm.stringWidth(msg)) / 2;
+          int y = getHeight() / 2;
+          
+          // Sombra del texto
+          g2d.setColor(new Color(0, 0, 0, 150));
+          g2d.drawString(msg, x + 2, y + 2);
+          
+          // Texto principal
+          g2d.setColor(new Color(255, 255, 255, 220));
+          g2d.drawString(msg, x, y);
+          
+          g2d.dispose();
+        }
+      }
+    };
+    turnOverlayPanel.setOpaque(false);
+    setGlassPane(turnOverlayPanel);
+    turnOverlayPanel.setVisible(true);
 
     // Panel superior con turno e info de rango
     JPanel topPanel = new JPanel(new BorderLayout());
@@ -448,12 +483,13 @@ public class MultiplayerBattleFrame extends JDialog {
       return null; // Fuera de rango o misma posición
     }
     
+    // Usar colores sólidos (sin alpha) para evitar artefactos visuales en Swing
     if (CombatRules.isOptimalRange(type, distance)) {
-      return new Color(0, 100, 0, 150); // Verde oscuro semi-transparente
+      return new Color(0, 80, 0); // Verde oscuro sólido
     } else if (CombatRules.isPenalizedRange(type, distance)) {
-      return new Color(150, 75, 0, 150); // Naranja oscuro semi-transparente
+      return new Color(120, 60, 0); // Naranja oscuro sólido
     } else {
-      return new Color(100, 100, 0, 150); // Amarillo oscuro semi-transparente
+      return new Color(80, 80, 0); // Amarillo oscuro sólido
     }
   }
   
@@ -545,6 +581,11 @@ public class MultiplayerBattleFrame extends JDialog {
       turnLabel.setForeground(new Color(200, 50, 50));
     }
     turnLabel.setText(turnInfo);
+    
+    // Actualizar overlay visual
+    if (turnOverlayPanel != null) {
+      turnOverlayPanel.repaint();
+    }
   }
   
   public void updateTurnDisplay() {
