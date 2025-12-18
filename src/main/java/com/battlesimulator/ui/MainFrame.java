@@ -1,18 +1,46 @@
 package com.battlesimulator.ui;
 
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.awt.Font;
+import java.awt.GridLayout;
+import java.sql.SQLException;
+
+import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.JButton;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
+
 import com.battlesimulator.database.DatabaseManager;
 import com.battlesimulator.database.User;
 import com.battlesimulator.database.UserStats;
-import com.battlesimulator.domain.*;
+import com.battlesimulator.domain.Army;
+import com.battlesimulator.domain.Clan;
+import com.battlesimulator.domain.Element;
+import com.battlesimulator.domain.IWarrior;
+import com.battlesimulator.domain.IWeapon;
+import com.battlesimulator.domain.MagicWarrior;
+import com.battlesimulator.domain.MagicWeapon;
+import com.battlesimulator.domain.MeleeWarrior;
+import com.battlesimulator.domain.MeleeWeapon;
+import com.battlesimulator.domain.RangedWarrior;
+import com.battlesimulator.domain.RangedWeapon;
+import com.battlesimulator.domain.Warrior;
+import com.battlesimulator.domain.Weapon;
 import com.battlesimulator.network.GameClient;
 import com.battlesimulator.network.GameServer;
 import com.battlesimulator.network.Message;
 import com.battlesimulator.usecases.MultiplayerWarController;
 import com.battlesimulator.usecases.WarController;
-import java.awt.*;
-import java.sql.SQLException;
-import java.util.Random;
-import javax.swing.*;
 
 public class MainFrame extends JFrame {
   private Clan clan1;
@@ -348,8 +376,13 @@ public class MainFrame extends JFrame {
           });
         }
       });
-      
-      if (client.connect(host.trim(), 5555)) {
+
+      String[] parts = host.trim().split(":");
+
+      String hostDef = parts[0];
+      int port = Integer.parseInt(parts[1]);
+
+      if (client.connect(hostDef, port)) {
         isMultiplayer = true;
         isHost = false;
         hostBtn.setEnabled(false);

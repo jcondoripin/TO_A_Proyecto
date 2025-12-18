@@ -5,6 +5,7 @@ import com.battlesimulator.domain.*;
 import javax.swing.*;
 import java.awt.*;
 import java.util.Random;
+import java.util.UUID;
 
 public class ConfigDialog extends JDialog {
   private final MainFrame mainFrame;
@@ -223,7 +224,7 @@ public class ConfigDialog extends JDialog {
     Random rand = new Random();
     for (int i = 0; i < numArmies; i++) {
       Army army = new Army();
-      army.setId(String.valueOf((char) ('A' + i)));
+      army.setId(UUID.randomUUID().toString());
       army.setClan(clan);
       for (int j = 1; j <= numWarriorsPerArmy; j++) {
         // Generar aleatorio

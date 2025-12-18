@@ -360,12 +360,13 @@ public class BattleFrame extends JDialog {
       return null; // Fuera de rango o misma posición
     }
     
+    // Usar colores sólidos (sin alpha) para evitar artefactos visuales en Swing
     if (CombatRules.isOptimalRange(type, distance)) {
-      return new Color(0, 100, 0, 150); // Verde oscuro semi-transparente
+      return new Color(0, 80, 0); // Verde oscuro sólido
     } else if (CombatRules.isPenalizedRange(type, distance)) {
-      return new Color(150, 75, 0, 150); // Naranja oscuro semi-transparente
+      return new Color(120, 60, 0); // Naranja oscuro sólido
     } else {
-      return new Color(100, 100, 0, 150); // Amarillo oscuro semi-transparente
+      return new Color(80, 80, 0); // Amarillo oscuro sólido
     }
   }
   

@@ -13,7 +13,6 @@ public class ImageResources {
   private static ImageResources instance;
   private final Map<String, BufferedImage> imageCache = new HashMap<>();
   
-  // Rutas de imágenes por tipo de guerrero
   private static final String IMAGES_PATH = "resources/images/warriors/";
   private static final String MELEE_ICON = "melee.png";
   private static final String RANGED_ICON = "ranged.png";
@@ -32,13 +31,11 @@ public class ImageResources {
   }
   
   private void loadImages() {
-    // Intentar cargar imágenes desde archivos
     tryLoadImage("melee", IMAGES_PATH + MELEE_ICON);
     tryLoadImage("ranged", IMAGES_PATH + RANGED_ICON);
     tryLoadImage("magic", IMAGES_PATH + MAGIC_ICON);
     tryLoadImage("default", IMAGES_PATH + DEFAULT_ICON);
     
-    // Si no existen, crear imágenes por defecto
     if (!imageCache.containsKey("melee")) {
       imageCache.put("melee", createDefaultWarriorImage("M", new Color(180, 50, 50)));
     }
